@@ -11,6 +11,23 @@ A structured reference of music industry data APIs for our hackathon project.
 | [Royalti.io](apis/royalti/README.md) | Royalty management (catalog, splits, payments, DDEX distribution) | [Endpoints](apis/royalti/endpoints/) |
 | [JamBase](apis/jambase/README.md) | Live music events (concerts, festivals, venues, ticketing) | [Endpoints](apis/jambase/endpoints/) |
 
+## Provider Comparison
+
+| Aspect | Chartmetric | Luminate | Royalti.io | JamBase |
+|--------|-------------|---------|------------|---------|
+| Focus | Market analytics | Industry consumption | Royalty management | Live events |
+| Endpoints | ~65 | 9 | ~160 | 17 |
+| Streaming metrics | Playlist reach, trends | Raw consumption data | Revenue per stream | - |
+| Charts | Platform charts | Billboard (200+) | - | - |
+| Social media | Yes | No | No | No |
+| Sales data | No | Yes | Yes (via royalties) | No |
+| Revenue/royalty | No | No | Full accounting | No |
+| Live events | No | No | No | Yes (3M+ events) |
+| Venues | No | No | No | Yes (170K+) |
+| Ticketing | No | No | No | Yes (15+ sources) |
+| Geo search | City-level | 63 territories + DMA | No | Lat/lng, IP, metros |
+| Content distribution | No | No | DDEX | No |
+
 ## Repository Structure
 
 ```
