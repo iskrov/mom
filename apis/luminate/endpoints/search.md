@@ -11,7 +11,7 @@ Search across all music entity types. Returns basic identifiers for use with det
 | query | String | yes | Search text (name, title, keyword) |
 | entity_type | String | yes | Entity to search (see values below) |
 | from | Integer | no | Pagination offset (default: 0) |
-| size | Integer | no | Results per page (default: 10, max: 50) |
+| size | Integer | no | Results per page (min: 10, default: 10, max: 500) |
 
 **`entity_type` values:** `artist`, `song`, `musical_recording`, `musical_release_group`, `musical_product`
 
