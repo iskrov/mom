@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&R Decision Tool — User Journey</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0e0e10;
+    --surface: #17171a;
+    --border: #2a2a2f;
+    --purple: #9b6dff;
+    --orange: #ff7c3a;
+    --green: #3ddc84;
+    --text: #e8e8ec;
+    --muted: #6b6b78;
+    --tbd: #ff7c3a44;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    padding: 48px 40px;
+    min-height: 100vh;
+  }
+
+  header {
+    margin-bottom: 48px;
+  }
+  header h1 {
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 8px;
+  }
+  header h2 {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text);
+  }
+  header h2 span { color: var(--purple); }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    color: var(--muted);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot-purple { background: var(--purple); }
+  .dot-green { background: var(--green); }
+  .dot-orange { background: var(--orange); }
+
+  /* Flow layout */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* Phase row */
+  .phase-label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 10px;
+    padding-left: 2px;
+  }
+
+  /* Connector */
+  .connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 0;
+  }
+  .connector-line {
+    width: 2px;
+    height: 28px;
+    background: linear-gradient(to bottom, var(--border), var(--purple));
+  }
+  .connector-arrow {
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--purple);
+  }
+  .connector-v {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* Entry node */
+  .node-entry {
+    background: var(--purple);
+    color: #fff;
+    border-radius: 8px;
+    padding: 14px 24px;
+    font-size: 15px;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 0.02em;
+    max-width: 320px;
+    margin: 0 auto;
+  }
+
+  /* Branch container */
+  .branch-container {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    align-items: flex-start;
+    margin-top: 0;
+  }
+
+  /* Branch label row */
+  .branch-split {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .branch-split::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 20px;
+    background: var(--purple);
+  }
+  .branch-split::after {
+    content: '';
+    position: absolute;
+    top: 20px;
+    /* horizontal bar connecting branches */
+    left: calc(12.5%);
+    width: 75%;
+    height: 2px;
+    background: var(--purple);
+  }
+
+  /* Branch card column */
+  .branch {
+    flex: 1;
+    min-width: 180px;
+    max-width: 220px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .branch-drop {
+    width: 2px;
+    height: 24px;
+    background: var(--purple);
+  }
+
+  .branch-header {
+    background: var(--surface);
+    border: 1.5px solid var(--purple);
+    border-radius: 8px;
+    padding: 12px 14px;
+    width: 100%;
+    text-align: center;
+  }
+  .branch-header .tag {
+    font-size: 10px;
+    color: var(--purple);
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .branch-header .title {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  /* Input/output blocks */
+  .block-connector {
+    width: 2px;
+    height: 16px;
+    background: var(--border);
+  }
+
+  .block {
+    width: 100%;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+  .block-input {
+    background: #1c1c22;
+    border: 1px solid var(--border);
+  }
+  .block-output {
+    background: #131a19;
+    border: 1px solid #2a3a32;
+  }
+  .block-tbd {
+    background: #1f1912;
+    border: 1px dashed var(--orange);
+    opacity: 0.85;
+  }
+  .block label {
+    display: block;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 6px;
+  }
+  .block-input label { color: var(--purple); }
+  .block-output label { color: var(--green); }
+  .block-tbd label { color: var(--orange); }
+  .block ul { padding-left: 14px; }
+  .block li { margin-bottom: 2px; color: #b0b0be; }
+  .block li span.hl { color: var(--text); font-weight: 600; }
+
+  /* Merge */
+  .merge-label {
+    text-align: center;
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 12px;
+  }
+
+  .node-action {
+    background: var(--surface);
+    border: 1.5px solid var(--green);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 14px 24px;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+  .node-action .sub {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 4px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .node-terminal {
+    background: var(--green);
+    color: #0e1a12;
+    border-radius: 8px;
+    padding: 14px 24px;
+    font-size: 15px;
+    font-weight: 800;
+    text-align: center;
+    max-width: 360px;
+    margin: 0 auto;
+  }
+
+  .full-connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 4px 0;
+  }
+  .full-connector .line { width: 2px; height: 24px; background: var(--border); }
+  .full-connector .arrow {
+    width: 0; height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--muted);
+  }
+
+  .tbd-note {
+    text-align: center;
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: var(--orange);
+    margin-top: 6px;
+    opacity: 0.7;
+  }
+
+  /* Merge line visual */
+  .merge-bar {
+    display: flex;
+    justify-content: center;
+    margin: 4px 0;
+  }
+  .merge-bar-line {
+    width: 75%;
+    height: 2px;
+    background: var(--border);
+    position: relative;
+  }
+  .merge-bar-line::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 2px;
+    height: 20px;
+    background: var(--border);
+  }
+
+  .stakeholders {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 36px;
+    flex-wrap: wrap;
+  }
+  .stakeholder-pill {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    color: var(--muted);
+  }
+  .stakeholder-pill.primary {
+    border-color: var(--purple);
+    color: var(--purple);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Hackathon · Music Data · 2025</h1>
+  <h2><span>A&R</span> Decision Tool — User Journey Map</h2>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><div class="dot dot-purple"></div> Input / Trigger</div>
+  <div class="legend-item"><div class="dot dot-green"></div> Output / Result</div>
+  <div class="legend-item"><div class="dot dot-orange"></div> TBD / Future Feature</div>
+</div>
+
+<div class="stakeholders">
+  <div class="stakeholder-pill primary">👤 A&R (Label / Publisher) — Primary User</div>
+  <div class="stakeholder-pill">🎧 Remix Artist / SC User</div>
+  <div class="stakeholder-pill">☁️ SoundCloud</div>
+  <div class="stakeholder-pill">🏢 Label / Publisher</div>
+</div>
+
+<div class="flow">
+
+  <!-- Entry -->
+  <div style="display:flex;justify-content:center;">
+    <div class="node-entry">Open App / Browser Module</div>
+  </div>
+
+  <!-- Connector -->
+  <div class="connector"><div class="connector-v"><div class="connector-line"></div><div class="connector-arrow"></div></div></div>
+
+  <!-- Branch split visual bar -->
+  <div style="position:relative; display:flex; justify-content:center; height:28px; margin-bottom:0;">
+    <div style="position:absolute; top:0; left:50%; transform:translateX(-50%); width:2px; height:14px; background:var(--purple);"></div>
+    <div style="position:absolute; top:14px; left:calc(10%); width:80%; height:2px; background:var(--purple);"></div>
+    <div style="position:absolute; top:14px; left:calc(10%); width:2px; height:14px; background:var(--purple);"></div>
+    <div style="position:absolute; top:14px; left:calc(10% + 26.6%); width:2px; height:14px; background:var(--purple);"></div>
+    <div style="position:absolute; top:14px; left:calc(10% + 53.3%); width:2px; height:14px; background:var(--purple);"></div>
+    <div style="position:absolute; top:14px; right:calc(10%); width:2px; height:14px; background:var(--purple);"></div>
+  </div>
+
+  <!-- 4 Branches -->
+  <div class="branch-container">
+
+    <!-- Option 1 -->
+    <div class="branch">
+      <div class="branch-header">
+        <div class="tag">Option 1</div>
+        <div class="title">SC Remix Search</div>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-input">
+        <label>Input</label>
+        <ul>
+          <li><span class="hl">SoundCloud link</span></li>
+          <li>Genre / Region / Stage filters</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-output">
+        <label>Output</label>
+        <ul>
+          <li>Release date, plays, username</li>
+          <li>Performance velocity</li>
+          <li>Original artist ID</li>
+          <li>Remixing artist ID</li>
+          <li>Royalty projection</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-tbd">
+        <label>TBD</label>
+        <ul>
+          <li>Licensing splits view</li>
+          <li>Escalate to action</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Option 2 -->
+    <div class="branch">
+      <div class="branch-header">
+        <div class="tag">Option 2</div>
+        <div class="title">Artist Search</div>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-input">
+        <label>Input</label>
+        <ul>
+          <li><span class="hl">Artist name</span> or ISNI</li>
+          <li>↳ SC ACI lookup</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-output">
+        <label>Output</label>
+        <ul>
+          <li>SC tracks by artist</li>
+          <li>Track info + velocity</li>
+          <li>Remix artist info</li>
+          <li>Royalty projection</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-tbd">
+        <label>TBD</label>
+        <ul>
+          <li>Licensing splits view</li>
+          <li>Escalate to action</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Option 3 -->
+    <div class="branch">
+      <div class="branch-header">
+        <div class="tag">Option 3</div>
+        <div class="title">Song Search</div>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-input">
+        <label>Input</label>
+        <ul>
+          <li><span class="hl">ISRC / Song name</span></li>
+          <li><span class="hl">ISWC / Song name</span></li>
+          <li>↳ SC ACI lookup</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-output">
+        <label>Output</label>
+        <ul>
+          <li>SC tracks by ISRC/ISWC</li>
+          <li>Track info + velocity</li>
+          <li>Remix artist info</li>
+          <li>Royalty projection</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-tbd">
+        <label>TBD</label>
+        <ul>
+          <li>Licensing splits view</li>
+          <li>Escalate to action</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Option 4 -->
+    <div class="branch">
+      <div class="branch-header">
+        <div class="tag">Option 4</div>
+        <div class="title">Catalog Search</div>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-input">
+        <label>Input</label>
+        <ul>
+          <li><span class="hl">Rights credentials</span></li>
+          <li>Label / Publisher auth</li>
+          <li>↳ SC ACI lookup</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-output">
+        <label>Output</label>
+        <ul>
+          <li>All SC tracks in catalog</li>
+          <li>Report / chart view</li>
+          <li>Track info + velocity</li>
+          <li>Remix artist info</li>
+          <li>Royalty projection</li>
+        </ul>
+      </div>
+      <div class="block-connector"></div>
+      <div class="block block-tbd">
+        <label>TBD</label>
+        <ul>
+          <li>Licensing splits view</li>
+          <li>Escalate to action</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Merge bar -->
+  <div style="position:relative; display:flex; justify-content:center; height:28px; margin-top:8px;">
+    <div style="position:absolute; bottom:14px; left:calc(10%); width:80%; height:2px; background:var(--border);"></div>
+    <div style="position:absolute; bottom:14px; left:calc(10%); width:2px; height:14px; background:var(--border);"></div>
+    <div style="position:absolute; bottom:14px; left:calc(10% + 26.6%); width:2px; height:14px; background:var(--border);"></div>
+    <div style="position:absolute; bottom:14px; left:calc(10% + 53.3%); width:2px; height:14px; background:var(--border);"></div>
+    <div style="position:absolute; bottom:14px; right:calc(10%); width:2px; height:14px; background:var(--border);"></div>
+    <div style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:2px; height:14px; background:var(--border);"></div>
+  </div>
+
+  <!-- Action node -->
+  <div style="display:flex;justify-content:center; margin-bottom:4px;">
+    <div class="node-action">
+      Review Results &amp; Assess Opportunity
+      <div class="sub">A&R evaluates performance data, velocity, and artist profile</div>
+    </div>
+  </div>
+
+  <div class="full-connector"><div class="line"></div><div class="arrow"></div></div>
+
+  <!-- TBD escalate -->
+  <div style="display:flex;justify-content:center;">
+    <div class="block block-tbd" style="max-width:520px; text-align:center;">
+      <label style="justify-content:center; display:flex;">TBD — Escalate to Action</label>
+      <div style="display:flex; gap:24px; justify-content:center; margin-top:4px; font-size:12px; color:#b07040;">
+        <span>📋 License Deal</span>
+        <span>📁 Add to Review Queue</span>
+        <span>🚫 Initiate Takedown</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="full-connector"><div class="line"></div><div class="arrow"></div></div>
+
+  <!-- Terminal -->
+  <div style="display:flex;justify-content:center;">
+    <div class="node-terminal">Revenue Generated · Catalog Protected</div>
+  </div>
+
+</div>
+
+</body>
+</html>
