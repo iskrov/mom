@@ -1,395 +1,356 @@
 #!/usr/bin/env python3
 """
-Remix Radar -- Main Pipeline Orchestrator.
+Remix Radar pipeline orchestrator and reusable workflow service layer.
 
-Chains all platform clients together to produce a full remix
-evaluation report from a single SoundCloud URL.
-
-Usage:
-    python -m scripts.pipeline "https://soundcloud.com/artist/track"
+This module now exposes reusable analysis functions suitable for both:
+- CLI workflows (current hackathon usage)
+- future FastAPI endpoints (planned)
 """
 
-import sys
+import argparse
 from datetime import datetime
 
-import requests
-
+from scripts.catalog import parse_catalog_file
 from scripts.config import cfg
-from scripts.models import assess_viability, parse_remix_title, project_revenue
+from scripts.models import (
+    assess_viability,
+    build_opportunity_score,
+    parse_remix_title,
+    project_revenue,
+)
 from scripts.platforms import ChartmetricClient, LuminateClient, SoundCloudClient
+from scripts.reporting import format_summary_table, format_track_report
 
 
-def _header(t):
-    print("\n" + "=" * 64 + "\n  " + t + "\n" + "=" * 64)
+DEFAULT_URL = "https://soundcloud.com/revelriesmusic/blinding_lights"
 
 
-def _section(t):
-    print("\n  --- " + t + " ---")
+def _print_banner():
+    print("=" * 72)
+    print("Remix Radar -- Pipeline")
+    print("Measure of Music 2026 Hackathon")
+    print("=" * 72)
+    print("Time:  ", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
-def _ok(m):
-    print("  [OK]   " + m)
+def _print_credentials():
+    print("\nCredential Check")
+    print("-" * 72)
+    for name, ok in cfg.check_credentials():
+        status = "OK" if ok else "MISSING"
+        print(f"{name:<32} {status}")
 
 
-def _fail(m):
-    print("  [FAIL] " + m)
+def enrich_artist(cm, artist_name):
+    """
+    Reusable artist enrichment function.
 
-
-def _warn(m):
-    print("  [WARN] " + m)
-
-
-def _info(m):
-    print("         " + m)
-
-
-def _kv(k, v, indent=9):
-    label = k + ":"
-    print(" " * indent + "{:<30} {}".format(label, v))
-
-
-def _num(n):
-    if n is None:
-        return "N/A"
-    if isinstance(n, float):
-        return "{:,.2f}".format(n)
-    return "{:,}".format(n)
-
-
-def _usd(n):
-    return "${:,.0f}".format(n)
-
-
-def step_soundcloud(sc, url):
-    """Step 1: Resolve SoundCloud URL and compute engagement metrics."""
-    _header("STEP 1: SoundCloud -- Resolve and Analyze")
-    _info("URL: " + url)
-
-    try:
-        track = sc.resolve(url)
-    except requests.HTTPError as e:
-        _fail("HTTP {} -- check the URL".format(e.response.status_code))
+    Returns a normalized dict used in scoring and reporting.
+    """
+    if not artist_name:
         return None
-    if not track or not track.get("id"):
-        _fail("Empty response. Check the URL.")
-        return None
-
-    _ok("Resolved: " + repr(track["title"]))
-    _kv("Artist", track.get("user", {}).get("username", "?"))
-    _kv("Genre", track.get("genre") or "N/A")
-    _kv("Track ID", str(track.get("id")))
-
-    metrics = sc.compute_metrics(track)
-    _section("Engagement Metrics")
-    _kv("Plays", _num(metrics["plays"]))
-    _kv("Likes", _num(metrics["likes"]))
-    _kv("Reposts", _num(metrics["reposts"]))
-    _kv("Comments", _num(metrics["comments"]))
-    _kv("Engagement Rate", "{:.2%}".format(metrics["engagement_rate"]))
-    _kv("Daily Velocity", _num(metrics["daily_velocity"]) + " plays/day")
-    _kv("Days Live", str(metrics["days_live"]) + " days")
-
-    parsed = parse_remix_title(track["title"])
-    _section("Parsed Title")
-    _kv("Original Artist", parsed["original_artist"] or "(not detected)")
-    _kv("Original Song", parsed["original_song"] or "(not detected)")
-    _kv("Remix Artist", parsed["remix_artist"] or "(not detected)")
-
-    sc_isrc = sc.extract_isrc(track)
-    if sc_isrc:
-        _kv("Remix ISRC (from SC)", sc_isrc)
-
-    return {
-        "track": track,
-        "metrics": metrics,
-        "parsed": parsed,
-        "remix_isrc": sc_isrc,
-    }
-
-
-def step_chartmetric_artist(cm, artist_name, track_name=None):
-    """Step 2: Search Chartmetric for the original artist + enrichment."""
-    _header("STEP 2: Chartmetric -- Artist Enrichment")
-    _info("Searching for: " + repr(artist_name))
-
     search_result = cm.find_artist(artist_name)
     if not search_result:
-        _fail("No Chartmetric results for " + repr(artist_name))
         return None
 
-    cm_id = search_result["id"]
-    score = search_result.get("cm_artist_score", 0)
-    _ok("{} (CM ID: {}, score: {:.1f})".format(
-        search_result.get("name", "?"), cm_id, score))
-    if search_result.get("name", "").lower() != artist_name.lower():
-        _info("(parsed as {}, matched to {})".format(
-            repr(artist_name), repr(search_result["name"])))
-
+    cm_id = search_result.get("id")
     meta = cm.get_artist(cm_id)
-    _section("Artist Metadata")
-    _kv("Spotify Followers", _num(search_result.get("sp_followers")))
-    _kv("Spotify Monthly Listeners", _num(search_result.get("sp_monthly_listeners")))
-    _kv("CM Artist Rank", str(meta.get("cm_artist_rank", "N/A")))
-    career = meta.get("career_status", {})
-    if career:
-        _kv("Career Stage", "{} ({})".format(
-            career.get("stage", "?"), career.get("trend", "?")))
-    genres = meta.get("genres", {})
-    primary = genres.get("primary", {}) if isinstance(genres, dict) else {}
-    gname = primary.get("name", "N/A") if isinstance(primary, dict) else "N/A"
-    _kv("Primary Genre", gname)
-    _kv("Record Label", meta.get("record_label") or "N/A")
-    _kv("Hometown", meta.get("hometown_city") or "N/A")
-
-    _section("Where People Listen (Top 5)")
+    career = {}
+    try:
+        career = cm.get_artist_career(cm_id)
+    except Exception:
+        # Career is helpful but optional for resilience.
+        career = {}
+    if isinstance(career, list):
+        career = career[0] if career else {}
+    if not isinstance(career, dict):
+        career = {}
     geo_raw = cm.get_where_people_listen(cm_id)
     cities = cm.parse_geo_data(geo_raw)
-    for c in cities[:5]:
-        _info("{} ({}): {} listeners, affinity {:.2f}".format(
-            c["name"], c["code2"], _num(c["listeners"]), c["affinity"]))
-
-    track_data = None
-    if track_name:
-        _section("Track Search: " + repr(track_name))
-        query = meta.get("name", artist_name) + " " + track_name
-        tracks = cm.search(query, "tracks", limit=5)
-        if tracks:
-            t = tracks[0]
-            _ok("Found: {} (CM Track ID: {})".format(
-                repr(t.get("name", "?")), t["id"]))
-            _kv("ISRC", t.get("isrc") or "N/A")
-            full = cm.get_track(t["id"])
-            track_data = {
-                "cm_track_id": t["id"],
-                "isrc": full.get("isrc"),
-                "name": full.get("name"),
-                "artist_names": full.get("artist_names", []),
-            }
-        else:
-            _warn("Track not found via Chartmetric search")
+    ids = cm.get_artist_platform_ids(cm_id)
+    platform_ids = ids[0] if isinstance(ids, list) and ids else (ids or {})
 
     return {
+        "input_name": artist_name,
         "cm_id": cm_id,
+        "name": search_result.get("name") or meta.get("name"),
+        "sp_followers": search_result.get("sp_followers"),
+        "sp_monthly_listeners": search_result.get("sp_monthly_listeners"),
+        "spotify_followers_to_listeners_ratio": search_result.get("spotify_followers_to_listeners_ratio"),
+        "spotify_listeners_to_followers_ratio": search_result.get("spotify_listeners_to_followers_ratio"),
+        "tiktok_followers": search_result.get("tiktok_followers"),
+        "cm_artist_score": search_result.get("cm_artist_score"),
+        "record_label": meta.get("record_label"),
+        "genres": meta.get("genres"),
+        "career": career,
+        "geo_cities": cities,
+        "platform_ids": platform_ids,
         "search_result": search_result,
-        "artist_meta": meta,
-        "cities": cities,
-        "track": track_data,
+        "metadata": meta,
     }
 
 
-def step_chartmetric_ids(cm, cm_id, isrc=None):
-    """Step 3: Cross-platform ID resolution."""
-    _header("STEP 3: Chartmetric -- Cross-Platform IDs")
+def find_original_isrc(cm, artist_name, song_name):
+    """Find likely original track ISRC via Chartmetric track search."""
+    if not artist_name or not song_name:
+        return None
+    query = f"{artist_name} {song_name}"
+    tracks = cm.search(query, "tracks", limit=5)
+    if not tracks:
+        return None
+    top = tracks[0]
+    full = cm.get_track(top.get("id"))
+    isrc = full.get("isrc") or top.get("isrc")
+    return {
+        "cm_track_id": top.get("id"),
+        "name": full.get("name") or top.get("name"),
+        "isrc": isrc,
+        "artist_names": full.get("artist_names") or top.get("artist_names") or [],
+    }
 
-    _info("Artist IDs for CM {}...".format(cm_id))
-    artist_ids = None
+
+def fetch_luminate_by_isrc(lum, isrc):
+    """Try Luminate lookup (optional, fails gracefully)."""
+    if not isrc:
+        return None
     try:
-        artist_ids = cm.get_artist_platform_ids(cm_id)
-        if artist_ids:
-            top = artist_ids[0] if isinstance(artist_ids, list) else artist_ids
-            _ok("Spotify: {}, iTunes: {}, Deezer: {}".format(
-                top.get("spotify_artist_id", "N/A"),
-                top.get("itunes_artist_id", "N/A"),
-                top.get("deezer_artist_id", "N/A")))
-        else:
-            _warn("No cross-platform IDs returned")
-    except requests.HTTPError as e:
-        _fail("HTTP {}".format(e.response.status_code))
-
-    track_ids = None
-    if isrc:
-        _info("Track IDs for ISRC {}...".format(isrc))
-        try:
-            track_ids = cm.get_track_ids_by_isrc(isrc)
-            if track_ids:
-                _ok("Found {} mapping(s)".format(len(track_ids)))
-            else:
-                _warn("No track mappings for this ISRC")
-        except requests.HTTPError as e:
-            _fail("HTTP {}".format(e.response.status_code))
-
-    return {"artist_ids": artist_ids, "track_ids": track_ids}
-
-
-def step_luminate(lum, isrc, label=""):
-    """Step 4: Luminate consumption data by ISRC."""
-    _header("STEP 4: Luminate -- Consumption Data  " + label)
-    _info("ISRC: " + isrc)
-
-    data = None
-    try:
-        data = lum.get_consumption_by_isrc(isrc)
-    except Exception as e:
-        _warn("Error: " + str(e))
-
-    if data and data.get("title"):
-        _ok("{} by {}".format(
-            repr(data["title"]), data.get("display_artist_name", "?")))
-        streams = lum.extract_stream_count(data)
-        if streams:
-            _kv("Total Streams", _num(streams))
-        mlist = data.get("metrics", [])
-        if mlist:
-            _section("All Metrics")
-            for m in mlist[:8]:
-                name = m.get("metric_name") or m.get("name") or "?"
-                _kv(name, _num(m.get("value", 0)))
-        return data
-    else:
-        _warn("Luminate returned no data (service may be down)")
-        _info("Revenue projections will use SoundCloud-based model.")
+        return lum.get_consumption_by_isrc(isrc)
+    except Exception:
         return None
 
 
-def step_revenue(sc_plays, track_title=""):
-    """Step 5: Revenue projection and viability assessment."""
-    _header("STEP 5: Revenue Projection")
-    _info("SoundCloud plays: " + _num(sc_plays))
-    if track_title:
-        _info("Track: " + repr(track_title))
-
-    proj = project_revenue(sc_plays)
-
-    _section("Projected Revenue")
-    fmt = "  {:<15} {:>18} {:>14} {:>14} {:>14}"
-    print(fmt.format(
-        "Tier", "Est. DSP Streams", "Spotify", "Apple Music", "All DSPs"))
-    print("  " + "-" * 75)
-    for tier, d in proj.items():
-        r = d["revenue"]
-        print(fmt.format(
-            tier,
-            _num(d["estimated_streams"]),
-            _usd(r["spotify"]),
-            _usd(r["apple_music"]),
-            _usd(r["all_dsps_avg"]),
-        ))
-
-    viability = assess_viability(proj)
-    _section("Viability Assessment")
-    mid_s = "$" + _num(int(viability["mid_revenue"]))
-    thr_s = "$" + _num(viability["threshold"])
-    if viability["clears_threshold"]:
-        _ok("CLEARS {} threshold (mid tier: {})".format(thr_s, mid_s))
-    else:
-        _warn("BELOW {} threshold (mid tier: {})".format(thr_s, mid_s))
-    _info(viability["recommendation"])
-
-    return {"projections": proj, "viability": viability}
+def normalize_sc_track(track):
+    """Normalize SoundCloud track object to core fields used across workflows."""
+    return {
+        "id": track.get("id"),
+        "title": track.get("title"),
+        "genre": track.get("genre"),
+        "created_at": track.get("created_at"),
+        "permalink_url": track.get("permalink_url"),
+        "user": track.get("user", {}),
+        "raw": track,
+    }
 
 
-def run(sc_url):
-    """Run the complete Remix Radar pipeline from a SoundCloud URL."""
-    sc = SoundCloudClient()
-    cm = ChartmetricClient()
-    lum = LuminateClient()
+def analyze_track_object(sc_track, clients):
+    """
+    Core reusable per-track analysis function.
 
-    _header("REMIX RADAR PIPELINE")
-    _info("Input: " + sc_url)
-    _info("Time:  " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    This is the API-ready service function that all workflows call.
+    """
+    sc = clients["sc"]
+    cm = clients["cm"]
+    lum = clients["lum"]
 
-    passed = []
-    failed = []
+    norm_track = normalize_sc_track(sc_track)
+    parsed = parse_remix_title(norm_track["title"] or "")
+    sc_metrics = sc.compute_metrics(sc_track)
 
-    sc_data = step_soundcloud(sc, sc_url)
-    if not sc_data:
-        failed.append("soundcloud")
-        return {"passed": passed, "failed": failed}
-    passed.append("soundcloud")
+    original_name = parsed.get("original_artist")
+    remix_name = parsed.get("remix_artist") or sc_track.get("user", {}).get("username")
+    song_name = parsed.get("original_song")
 
-    parsed = sc_data["parsed"]
-    artist_name = parsed["original_artist"]
-    song_name = parsed["original_song"]
-    if not artist_name:
-        _warn("Could not parse original artist; using song title for search")
-        artist_name = song_name
+    original_artist = enrich_artist(cm, original_name) if original_name else None
+    remix_artist = enrich_artist(cm, remix_name) if remix_name else None
 
-    cm_data = None
-    if artist_name:
-        cm_data = step_chartmetric_artist(cm, artist_name, song_name)
-    if cm_data:
-        passed.append("chartmetric_artist")
-    else:
-        failed.append("chartmetric_artist")
+    original_geo = (original_artist or {}).get("geo_cities", [])
+    remix_geo = (remix_artist or {}).get("geo_cities", [])
+    original_career = (original_artist or {}).get("career", {})
+    remix_career = (remix_artist or {}).get("career", {})
 
-    isrc = None
-    if cm_data:
-        track_isrc = None
-        if cm_data.get("track"):
-            track_isrc = cm_data["track"].get("isrc")
-        ids = step_chartmetric_ids(cm, cm_data["cm_id"], isrc=track_isrc)
-        if ids.get("artist_ids"):
-            passed.append("cross_platform_ids")
-        else:
-            failed.append("cross_platform_ids")
-        if cm_data.get("track") and cm_data["track"].get("isrc"):
-            isrc = cm_data["track"]["isrc"]
-
-    lum_data = None
-    if isrc:
-        lum_label = "[" + repr(song_name or "") + "]"
-        lum_data = step_luminate(lum, isrc, label=lum_label)
-        if lum_data:
-            passed.append("luminate")
-        else:
-            failed.append("luminate")
-    else:
-        _info("Skipping Luminate (no ISRC available)")
-        failed.append("luminate_skipped")
-
-    rev = step_revenue(
-        sc_data["metrics"]["plays"],
-        sc_data["track"]["title"],
+    opportunity_score = build_opportunity_score(
+        sc_metrics=sc_metrics,
+        original_artist=original_artist or {},
+        remix_artist=remix_artist or {},
+        original_geo=original_geo,
+        remix_geo=remix_geo,
+        original_career=original_career,
+        remix_career=remix_career,
     )
-    passed.append("revenue_projection")
 
-    _header("PIPELINE SUMMARY")
-    total = len(passed) + len(failed)
-    print("\n  Steps passed: {} / {}".format(len(passed), total))
-    for s in passed:
-        _ok(s)
-    if failed:
-        print("\n  Steps failed: {} / {}".format(len(failed), total))
-        for s in failed:
-            _fail(s)
+    original_track = find_original_isrc(cm, original_name, song_name) if original_name and song_name else None
+    original_isrc = (original_track or {}).get("isrc")
+    luminate_data = fetch_luminate_by_isrc(lum, original_isrc)
+    projections = project_revenue(sc_metrics.get("plays", 0))
+    viability = assess_viability(projections)
 
     return {
-        "passed": passed,
-        "failed": failed,
-        "soundcloud": sc_data,
-        "chartmetric": cm_data,
-        "luminate": lum_data,
-        "revenue": rev,
+        "sc_url": norm_track.get("permalink_url"),
+        "track_id": norm_track.get("id"),
+        "track_title": norm_track.get("title"),
+        "track_genre": norm_track.get("genre"),
+        "sc_track": norm_track,
+        "sc_metrics": sc_metrics,
+        "parsed_title": parsed,
+        "original_artist": original_artist,
+        "remix_artist": remix_artist,
+        "original_track": original_track,
+        "original_isrc": original_isrc,
+        "luminate_data": luminate_data,
+        "opportunity_score": opportunity_score,
+        "revenue": {"projections": projections},
+        "viability": viability,
     }
+
+
+def analyze_url(sc_url, clients):
+    """Option 5: Analyze a single SoundCloud URL."""
+    sc_track = clients["sc"].resolve(sc_url)
+    return analyze_track_object(sc_track, clients)
+
+
+def search_song_remixes(song_name, artist_name=None, limit=20, clients=None):
+    """Option 3: Search SoundCloud remixes for a specific song."""
+    sc = clients["sc"]
+    tracks = sc.search_remixes(song_name=song_name, artist=artist_name, limit=limit)
+    reports = [analyze_track_object(track, clients) for track in tracks]
+    reports.sort(key=lambda r: r.get("opportunity_score", {}).get("overall", 0), reverse=True)
+    return reports
+
+
+def search_artist_remixes(artist_name, limit_songs=8, limit_remixes=6, clients=None):
+    """Option 2: Build remix candidates for an artist's song set."""
+    cm = clients["cm"]
+    artist = cm.find_artist(artist_name)
+    if not artist:
+        return []
+
+    # Practical fallback: seed songs from Chartmetric track search by artist name.
+    track_seeds = cm.search(artist.get("name", artist_name), "tracks", limit=limit_songs)
+    seen = set()
+    reports = []
+    for seed in track_seeds:
+        song = seed.get("name")
+        if not song or song.lower() in seen:
+            continue
+        seen.add(song.lower())
+        song_reports = search_song_remixes(
+            song_name=song,
+            artist_name=artist.get("name", artist_name),
+            limit=limit_remixes,
+            clients=clients,
+        )
+        reports.extend(song_reports)
+
+    # Deduplicate by SC track id.
+    dedup = {}
+    for report in reports:
+        dedup[report.get("track_id")] = report
+    ranked = list(dedup.values())
+    ranked.sort(key=lambda r: r.get("opportunity_score", {}).get("overall", 0), reverse=True)
+    return ranked
+
+
+def discover_remixes(genre=None, min_plays=0, created_after=None, limit=30, clients=None):
+    """Option 4: Discovery mode using search + filters."""
+    sc = clients["sc"]
+    tracks = sc.search_tracks(query="remix", limit=limit, genre=genre, created_after=created_after)
+    tracks = [t for t in tracks if (t.get("playback_count") or 0) >= (min_plays or 0)]
+    reports = [analyze_track_object(track, clients) for track in tracks]
+    reports.sort(key=lambda r: r.get("opportunity_score", {}).get("overall", 0), reverse=True)
+    return reports
+
+
+def process_catalog(filepath, limit_remixes=5, clients=None):
+    """Option 1: Bulk catalog flow from CSV/XML."""
+    records = parse_catalog_file(filepath)
+    all_reports = []
+    for record in records:
+        artist = record.get("artist")
+        title = record.get("title")
+        if not title:
+            continue
+        reports = search_song_remixes(
+            song_name=title, artist_name=artist, limit=limit_remixes, clients=clients
+        )
+        all_reports.extend(reports)
+    dedup = {r.get("track_id"): r for r in all_reports}
+    ranked = list(dedup.values())
+    ranked.sort(key=lambda r: r.get("opportunity_score", {}).get("overall", 0), reverse=True)
+    return ranked
+
+
+def make_clients():
+    return {
+        "sc": SoundCloudClient(),
+        "cm": ChartmetricClient(),
+        "lum": LuminateClient(),
+    }
+
+
+def build_arg_parser():
+    parser = argparse.ArgumentParser(description="Remix Radar pipeline CLI")
+    parser.add_argument("url", nargs="?", help="SoundCloud URL (Option 5)")
+    parser.add_argument("--song", help="Song title (Option 3)")
+    parser.add_argument("--artist", help="Artist name (Option 2/3)")
+    parser.add_argument("--discover", action="store_true", help="Discovery mode (Option 4)")
+    parser.add_argument("--genre", help="Genre filter for discovery")
+    parser.add_argument("--min-plays", type=int, default=0, help="Minimum play count for discovery")
+    parser.add_argument("--created-after", help="Created-at lower bound YYYY-MM-DD")
+    parser.add_argument("--limit", type=int, default=20, help="Result limit for search/discovery")
+    parser.add_argument("--catalog", help="CSV/XML catalog path (Option 1)")
+    parser.add_argument("--catalog-limit-remixes", type=int, default=5, help="Per-song remix limit in catalog mode")
+    return parser
 
 
 def main():
-    print("=" * 64)
-    print("  Remix Radar -- Pipeline")
-    print("  Measure of Music 2026 Hackathon")
-    print("=" * 64)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    pyver = sys.version.split()[0]
-    print("  Time:   " + now)
-    print("  Python: " + pyver)
+    _print_banner()
+    _print_credentials()
+    args = build_arg_parser().parse_args()
+    clients = make_clients()
 
-    _section("Credential Check")
-    for name, ok in cfg.check_credentials():
-        if ok:
-            _ok(name)
-        else:
-            _fail(name)
+    try:
+        if args.catalog:
+            reports = process_catalog(args.catalog, limit_remixes=args.catalog_limit_remixes, clients=clients)
+            print("\nCatalog Results")
+            print("-" * 72)
+            print(format_summary_table(reports))
+            return
 
-    if len(sys.argv) > 1:
-        test_url = sys.argv[1]
-    else:
-        test_url = "https://soundcloud.com/revelriesmusic/blinding_lights"
+        if args.discover:
+            reports = discover_remixes(
+                genre=args.genre,
+                min_plays=args.min_plays,
+                created_after=args.created_after,
+                limit=args.limit,
+                clients=clients,
+            )
+            print("\nDiscovery Results")
+            print("-" * 72)
+            print(format_summary_table(reports))
+            return
 
-    run(test_url)
+        if args.song:
+            reports = search_song_remixes(
+                song_name=args.song,
+                artist_name=args.artist,
+                limit=args.limit,
+                clients=clients,
+            )
+            print("\nSong Search Results")
+            print("-" * 72)
+            print(format_summary_table(reports))
+            return
 
-    print("\n" + "=" * 64)
-    print("  Done.")
-    print("=" * 64)
+        if args.artist and not args.url:
+            reports = search_artist_remixes(
+                artist_name=args.artist,
+                limit_songs=min(args.limit, 10),
+                limit_remixes=6,
+                clients=clients,
+            )
+            print("\nArtist Search Results")
+            print("-" * 72)
+            print(format_summary_table(reports))
+            return
+
+        # Default / Option 5
+        sc_url = args.url or DEFAULT_URL
+        report = analyze_url(sc_url, clients)
+        print()
+        print(format_track_report(report))
+    except Exception as exc:
+        print("\nERROR:", exc)
 
 
 if __name__ == "__main__":

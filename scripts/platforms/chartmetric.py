@@ -36,6 +36,7 @@ class ChartmetricClient:
             f"{self.base}{path}",
             headers={"Authorization": f"Bearer {token}"},
             params=params or {},
+            timeout=30,
         )
         resp.raise_for_status()
         return resp.json()
@@ -106,6 +107,18 @@ class ChartmetricClient:
         result or get_artist_stats(), not this endpoint.
         """
         return self._get(f"/artist/{cm_id}").get("obj", {})
+
+    def get_artist_career(self, cm_id):
+        """
+        Get artist career history snapshot for scoring.
+
+        Returns Chartmetric career progression fields such as:
+        - stage (undiscovered, developing, mid-level, mainstream, superstar, legendary)
+        - stage_score (0-100)
+        - momentum (decline, gradual decline, steady, growth, explosive growth)
+        - momentum_score (0-100)
+        """
+        return self._get(f"/artist/{cm_id}/career").get("obj", {})
 
     def get_artist_stats(self, cm_id, platform, since=None, until=None):
         """
