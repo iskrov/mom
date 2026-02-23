@@ -103,31 +103,55 @@ class SoundCloudClient:
         """
         Search for remixes of a specific song.
 
-        Constructs a search query like "Blinding Lights remix" and
-        optionally filters results whose titles contain the artist name.
+        When an artist is provided, runs two queries to maximize coverage:
+        one with the artist name (trusted -- all results kept) and one
+        without (filtered to only keep tracks that reference the artist
+        in title, username, description, or tag_list).
 
         Args:
             song_name: Original song title.
-            artist:    Optional original artist name for filtering.
+            artist:    Optional original artist name for relevance.
             limit:     Max results (default 50).
 
         Returns:
             List of track objects, sorted by playback_count descending.
         """
-        query = f"{song_name} remix"
-        results = self.search_tracks(query, limit=limit)
+        seen_ids: set[int] = set()
+        results: list[dict] = []
 
         if artist:
-            artist_lower = artist.lower()
-            results = [
-                t for t in results
-                if artist_lower in t.get("title", "").lower()
-                or artist_lower in (t.get("user", {}).get("username", "")).lower()
-                or artist_lower in (t.get("description") or "").lower()
-            ]
+            artist_query = f"{artist} {song_name} remix"
+            for t in self.search_tracks(artist_query, limit=limit):
+                tid = t.get("id")
+                if tid and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    results.append(t)
+
+        song_query = f"{song_name} remix"
+        for t in self.search_tracks(song_query, limit=limit):
+            tid = t.get("id")
+            if tid and tid not in seen_ids:
+                if artist and not self._mentions_artist(t, artist):
+                    continue
+                seen_ids.add(tid)
+                results.append(t)
 
         results.sort(key=lambda t: t.get("playback_count") or 0, reverse=True)
-        return results
+        return results[:limit]
+
+    @staticmethod
+    def _mentions_artist(track: dict, artist: str) -> bool:
+        """Check if any significant word of the artist name appears in track metadata."""
+        words = [w.lower() for w in artist.split() if len(w) > 2]
+        if not words:
+            words = [artist.lower()]
+        haystack = " ".join([
+            track.get("title", ""),
+            (track.get("user", {}).get("username", "")),
+            (track.get("description") or ""),
+            (track.get("tag_list") or ""),
+        ]).lower()
+        return any(w in haystack for w in words)
 
     def get_related(self, track_id, limit=50):
         """
