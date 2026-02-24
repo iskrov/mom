@@ -146,6 +146,10 @@ export function TrackDetail({ track, licensing, loadingLicensing, onClose }: Tra
             <div className="impact-value">{careerStage}</div>
             <div className="impact-label">Career Stage</div>
           </div>
+          <div className="impact-cell">
+            <div className="impact-value">{compact(track.remix_artist_enriched.sp_monthly_listeners || 0)}</div>
+            <div className="impact-label">Monthly Listeners</div>
+          </div>
         </div>
       </div>
 
