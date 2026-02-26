@@ -34,7 +34,7 @@ def _parse_csv(filepath):
             rows.append(
                 _norm_record(
                     artist=row.get("artist") or row.get("artist_name"),
-                    title=row.get("title") or row.get("song") or row.get("song_title"),
+                    title=row.get("title") or row.get("song") or row.get("song_title") or row.get("track_name"),
                     isrc=row.get("isrc"),
                 )
             )

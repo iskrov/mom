@@ -94,6 +94,7 @@ export async function streamSongSearch(
     body: JSON.stringify({
       song_name: filters.songName,
       artist_name: filters.songArtistName || undefined,
+      isrc_override: filters.isrcOverride.trim() || undefined,
       tracks_to_fetch: filters.tracksToFetch,
       enrich_chartmetric: filters.enrichChartmetric,
       check_official_release: filters.checkOfficialRelease,
@@ -146,31 +147,68 @@ export async function analyzeScUrl(scUrl: string): Promise<TrackResult> {
   return response.json() as Promise<TrackResult>
 }
 
-export async function runCatalogSearch(
+export async function streamCatalogSearch(
   file: File,
   limitRemixes: number,
+  minPlays: number,
+  handlers: EventHandlers,
   signal: AbortSignal,
-): Promise<TrackResult[]> {
+): Promise<void> {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('limit_remixes', String(limitRemixes))
+  formData.append('min_plays', String(minPlays))
 
   const response = await fetch(`${API_BASE}/search/catalog`, {
     method: 'POST',
     body: formData,
     signal,
   })
-  if (!response.ok) {
+  if (!response.ok || !response.body) {
     throw new Error(`Catalog search failed: ${response.status}`)
   }
-  const payload = (await response.json()) as { results: TrackResult[] }
-  return payload.results || []
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+
+    for (const block of blocks) {
+      const parsed = parseBlock(block)
+      if (!parsed) continue
+
+      if (parsed.event === 'status' && handlers.onStatus) {
+        handlers.onStatus(parsed.data as { message: string; count?: number })
+      }
+      if (parsed.event === 'track' && handlers.onTrack) {
+        handlers.onTrack((parsed.data as { track: TrackResult }).track)
+      }
+      if (parsed.event === 'complete' && handlers.onComplete) {
+        handlers.onComplete((parsed.data as { results: TrackResult[] }).results)
+      }
+    }
+  }
 }
 
-export async function fetchLicensing(trackId: number): Promise<LicensingPayload> {
-  const response = await fetch(`${API_BASE}/tracks/${trackId}/licensing`)
+export async function fetchLicensing(
+  trackId: number,
+  songTitle?: string,
+  artistName?: string,
+): Promise<LicensingPayload> {
+  const params = new URLSearchParams()
+  if (songTitle) params.set('song_title', songTitle)
+  if (artistName) params.set('artist_name', artistName)
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const response = await fetch(`${API_BASE}/tracks/${trackId}/licensing${query}`)
   if (!response.ok) {
-    throw new Error('Failed to fetch licensing mock data.')
+    throw new Error('Failed to fetch licensing data.')
   }
   return response.json() as Promise<LicensingPayload>
 }

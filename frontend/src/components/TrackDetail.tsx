@@ -11,6 +11,7 @@ function compact(n: number): string {
   return Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n)
 }
 
+
 function badgeLabel(label: string): string {
   if (label === 'STRONG') return 'A'
   if (label === 'MODERATE') return 'B'
@@ -23,6 +24,13 @@ function formatDate(value?: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Unknown date'
   return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+}
+
+function formatReleaseDate(value?: string): string {
+  if (!value) return 'Unknown'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function formatCareerStage(value?: string): string {
@@ -52,6 +60,25 @@ export function TrackDetail({ track, licensing, loadingLicensing, onClose }: Tra
   const midRevenue = track.revenue.projections?.mid?.revenue?.all_dsps_avg ?? 0
   const splitEntries = licensing?.entries || []
   const careerStage = formatCareerStage(track.remix_artist_enriched.career_stage)
+  const trackMeta = track.original_track_enriched || { songwriters: [] }
+  const songwriterCount = trackMeta.songwriters.length
+  const songwriterFull = songwriterCount > 0 ? trackMeta.songwriters.join(', ') : 'Unknown'
+  const songwriterPreview =
+    songwriterCount > 2
+      ? `${trackMeta.songwriters.slice(0, 2).join(', ')} +${songwriterCount - 2} others`
+      : songwriterFull
+  const scFollowers = track.sc_user.followers_count || 0
+  const spFollowers = track.remix_artist_enriched.sp_followers || 0
+  const ttFollowers = track.remix_artist_enriched.tiktok_followers || 0
+  const totalAudience = scFollowers + spFollowers + ttFollowers
+  const audienceTooltip = [
+    spFollowers > 0 && `Spotify     ${compact(spFollowers)}`,
+    ttFollowers > 0 && `TikTok      ${compact(ttFollowers)}`,
+    scFollowers > 0 && `SoundCloud  ${compact(scFollowers)}`,
+  ]
+    .filter(Boolean)
+    .join('\n') || 'No follower data'
+
   const velocityBars = Array.from({ length: 30 }, (_, idx) => {
     const base = Math.max(track.daily_velocity * 0.55, 1)
     const growth = idx / 29
@@ -135,20 +162,66 @@ export function TrackDetail({ track, licensing, loadingLicensing, onClose }: Tra
         <div className="detail-section-title">REMIX ARTIST IMPACT</div>
         <div className="impact-grid">
           <div className="impact-cell">
-            <div className="impact-value">{compact(track.sc_user.followers_count || 0)}</div>
-            <div className="impact-label">Followers</div>
+            <div
+              className="impact-value impact-value-audience hover-tooltip hover-tooltip-pre"
+              data-tooltip={audienceTooltip}
+              tabIndex={0}
+            >
+              {compact(totalAudience)}
+            </div>
+            <div className="impact-label">Total Audience</div>
           </div>
-          <div className="impact-cell">
-            <div className="impact-value">{track.sc_user.track_count || 0}</div>
-            <div className="impact-label">Tracks</div>
-          </div>
-          <div className="impact-cell">
-            <div className="impact-value">{careerStage}</div>
+<div className="impact-cell">
+            <div className="impact-value impact-value-stage">{careerStage}</div>
             <div className="impact-label">Career Stage</div>
           </div>
           <div className="impact-cell">
             <div className="impact-value">{compact(track.remix_artist_enriched.sp_monthly_listeners || 0)}</div>
             <div className="impact-label">Monthly Listeners</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="detail-section">
+        <div className="detail-section-title">ORIGINAL ARTIST</div>
+        <div className="detail-grid">
+          <div className="detail-stat">
+            <span>Artist</span>
+            <strong>{track.original_artist_enriched.name || track.original_artist || 'Unknown'}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>Record Label</span>
+            <strong>{track.original_artist_enriched.record_label || 'Unknown'}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>Career Stage</span>
+            <strong>{formatCareerStage(track.original_artist_enriched.career_stage)}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>Monthly Listeners</span>
+            <strong>{compact(track.original_artist_enriched.sp_monthly_listeners || 0)}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>Release Date</span>
+            <strong>{formatReleaseDate(trackMeta.release_date)}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>ISRC</span>
+            <strong>{trackMeta.isrc || 'Unknown'}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>Songwriters</span>
+            <strong className="hover-tooltip" data-tooltip={songwriterFull} tabIndex={0}>
+              {songwriterPreview}
+            </strong>
+          </div>
+          <div className="detail-stat">
+            <span>Match Confidence</span>
+            <strong>
+              {typeof trackMeta.match_confidence === 'number'
+                ? `${Math.round(trackMeta.match_confidence * 100)}%`
+                : 'N/A'}
+            </strong>
           </div>
         </div>
       </div>

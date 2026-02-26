@@ -242,6 +242,12 @@ class ChartmetricClient:
             f"/track/isrc/{isrc}/get-ids"
         ).get("obj", [])
 
+    # ── ALBUMS ─────────────────────────────────────────────────────
+
+    def get_album(self, cm_album_id):
+        """Album metadata by CM album ID."""
+        return self._get(f"/album/{cm_album_id}").get("obj", {})
+
     # ── CHARTS ─────────────────────────────────────────────────────
 
     def get_chart(self, platform, params=None):

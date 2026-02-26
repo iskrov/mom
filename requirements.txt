@@ -3,3 +3,4 @@ python-dotenv>=1.0
 fastapi
 uvicorn[standard]
 pydantic
+musicbrainzngs>=0.7

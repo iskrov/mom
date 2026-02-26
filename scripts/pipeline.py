@@ -8,6 +8,7 @@ This module now exposes reusable analysis functions suitable for both:
 """
 
 import argparse
+import re
 from datetime import datetime
 
 from scripts.catalog import parse_catalog_file
@@ -23,6 +24,138 @@ from scripts.reporting import format_summary_table, format_track_report
 
 
 DEFAULT_URL = "https://soundcloud.com/revelriesmusic/blinding_lights"
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9\s]+")
+_SPACE_RE = re.compile(r"\s+")
+_REMIX_MARKERS = {
+    "remix",
+    "edit",
+    "bootleg",
+    "mashup",
+    "flip",
+    "rework",
+    "cover",
+    "acoustic",
+    "live",
+    "nightcore",
+    "slowed",
+    "sped",
+}
+
+
+def _extract_release_date(track_obj):
+    release_date = (track_obj.get("release_date") or "").strip()
+    if release_date:
+        return release_date
+
+    release_dates = track_obj.get("release_dates")
+    if isinstance(release_dates, str):
+        return release_dates.strip() or None
+    if isinstance(release_dates, list):
+        cleaned = sorted([str(d).strip() for d in release_dates if str(d).strip()])
+        if cleaned:
+            return cleaned[0]
+    return None
+
+
+def _extract_songwriters(track_obj):
+    names = []
+    seen = set()
+
+    def _is_valid_name(text):
+        # Drop obvious non-name payload fragments (pure numbers, id blobs, etc.).
+        if not text:
+            return False
+        compact = text.replace(" ", "")
+        if compact.isdigit():
+            return False
+        if len(text) < 3:
+            return False
+        return True
+
+    def _add(name):
+        raw = str(name or "").strip()
+        if not raw:
+            return
+        # Chartmetric may return a comma-joined songwriter blob in a single string.
+        parts = [part.strip() for part in raw.split(",")]
+        for text in parts:
+            if not _is_valid_name(text):
+                continue
+            key = text.lower()
+            if key not in seen:
+                seen.add(key)
+                names.append(text)
+
+    for key in ("songwriters", "cm_songwriters"):
+        raw = track_obj.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, dict):
+                    _add(item.get("name") or item.get("songwriter_name"))
+                else:
+                    _add(item)
+
+    _add(track_obj.get("composer_name"))
+    return names
+
+
+def resolve_track_by_isrc(cm, isrc):
+    """Resolve canonical Chartmetric track metadata by ISRC."""
+    clean_isrc = (isrc or "").strip().upper()
+    if not clean_isrc:
+        return None
+
+    try:
+        ids_obj = cm.get_track_ids_by_isrc(clean_isrc) or {}
+        if isinstance(ids_obj, list):
+            ids_row = ids_obj[0] if ids_obj else {}
+        elif isinstance(ids_obj, dict):
+            ids_row = ids_obj
+        else:
+            ids_row = {}
+        cm_ids = ids_row.get("chartmetric_ids") or []
+        if not cm_ids:
+            return None
+        cm_track_id = cm_ids[0]
+        full = cm.get_track(cm_track_id) or {}
+    except Exception:
+        return None
+
+    album_record_label = ""
+    album_ids = full.get("album_ids") or []
+    release_dates = full.get("release_dates") or []
+
+    album_order: list[int] = []
+    if isinstance(album_ids, list) and album_ids:
+        if isinstance(release_dates, list) and len(release_dates) == len(album_ids):
+            paired = sorted(zip(release_dates, album_ids), key=lambda p: str(p[0] or "9999-99-99"))
+            album_order = [album_id for _, album_id in paired]
+        else:
+            album_order = list(album_ids)
+
+    for album_id in album_order[:5]:
+        try:
+            album_meta = cm.get_album(album_id) or {}
+        except Exception:
+            album_meta = {}
+        candidate = (album_meta.get("label") or "").strip()
+        if candidate:
+            album_record_label = candidate
+            break
+
+    return {
+        "cm_track_id": cm_track_id,
+        "name": full.get("name"),
+        "isrc": full.get("isrc") or clean_isrc,
+        "artist_names": full.get("artist_names") or [],
+        "release_date": _extract_release_date(full),
+        "songwriters": _extract_songwriters(full),
+        "album_label": full.get("album_label"),
+        "album_record_label": album_record_label,
+        "track_record_label": full.get("record_label") or full.get("label"),
+        "match_confidence": 1.0,
+    }
 
 
 def _print_banner():
@@ -65,10 +198,12 @@ def enrich_artist(cm, artist_name):
         career = career[0] if career else {}
     if not isinstance(career, dict):
         career = {}
-    geo_raw = cm.get_where_people_listen(cm_id)
-    cities = cm.parse_geo_data(geo_raw)
-    ids = cm.get_artist_platform_ids(cm_id)
-    platform_ids = ids[0] if isinstance(ids, list) and ids else (ids or {})
+    cities = []
+    try:
+        ids = cm.get_artist_platform_ids(cm_id)
+        platform_ids = ids[0] if isinstance(ids, list) and ids else (ids or {})
+    except Exception:
+        platform_ids = {}
 
     return {
         "input_name": artist_name,
@@ -94,18 +229,179 @@ def find_original_isrc(cm, artist_name, song_name):
     """Find likely original track ISRC via Chartmetric track search."""
     if not artist_name or not song_name:
         return None
+
+    def _norm(value):
+        text = (value or "").lower()
+        text = _NON_ALNUM_RE.sub(" ", text)
+        return _SPACE_RE.sub(" ", text).strip()
+
+    def _artist_names(obj):
+        names = []
+        raw_names = obj.get("artist_names")
+        if isinstance(raw_names, list):
+            names.extend([_norm(n) for n in raw_names if n])
+        elif isinstance(raw_names, str):
+            names.append(_norm(raw_names))
+
+        raw_artists = obj.get("artists")
+        if isinstance(raw_artists, list):
+            for item in raw_artists:
+                if isinstance(item, dict):
+                    name = item.get("name")
+                    if name:
+                        names.append(_norm(name))
+                elif isinstance(item, str):
+                    names.append(_norm(item))
+        elif isinstance(raw_artists, str):
+            names.append(_norm(raw_artists))
+
+        # Deduplicate while preserving order.
+        deduped = []
+        seen = set()
+        for name in names:
+            if name and name not in seen:
+                seen.add(name)
+                deduped.append(name)
+        return deduped
+
+    def _artist_match(target, candidates):
+        if not target or not candidates:
+            return False
+        target_tokens = [t for t in target.split() if t]
+        for cand in candidates:
+            if target in cand or cand in target:
+                return True
+            cand_tokens = [t for t in cand.split() if t]
+            overlap = len(set(target_tokens).intersection(cand_tokens))
+            if overlap >= 2:
+                return True
+        return False
+
+    def _score_track_candidate(candidate):
+        score = 0
+
+        target_song = _norm(song_name)
+        target_artist = _norm(artist_name)
+        cand_name = _norm(candidate.get("name"))
+        cand_artists = _artist_names(candidate)
+
+        if cand_name == target_song:
+            score += 140
+        elif target_song and target_song in cand_name:
+            score += 80
+        elif cand_name and target_song and any(tok in cand_name for tok in target_song.split()):
+            score += 25
+
+        artist_match = _artist_match(target_artist, cand_artists)
+        if artist_match:
+            score += 120
+        elif target_artist and cand_artists:
+            # Strong penalty if we have artist data and it doesn't match the requested original artist.
+            score -= 120
+
+        if cand_name and any(marker in cand_name.split() for marker in _REMIX_MARKERS):
+            score -= 80
+
+        if candidate.get("isrc"):
+            score += 10
+
+        return score
+
     query = f"{artist_name} {song_name}"
-    tracks = cm.search(query, "tracks", limit=5)
+    tracks = cm.search(query, "tracks", limit=10)
     if not tracks:
         return None
-    top = tracks[0]
-    full = cm.get_track(top.get("id"))
+
+    scored = sorted(
+        [{"track": track, "score": _score_track_candidate(track)} for track in tracks],
+        key=lambda row: row["score"],
+        reverse=True,
+    )
+    finalists = []
+    for row in scored[:5]:
+        track = row["track"]
+        try:
+            full_track = cm.get_track(track.get("id")) or {}
+        except Exception:
+            full_track = {}
+        merged = {**track, **full_track}
+        finalists.append({"track": track, "full": full_track, "score": _score_track_candidate(merged)})
+
+    finalists.sort(key=lambda row: row["score"], reverse=True)
+    top = finalists[0]["track"]
+    full = finalists[0]["full"] or {}
+    top_score = int(finalists[0]["score"])
+    score_gap = top_score - int(finalists[1]["score"]) if len(finalists) > 1 else top_score
+    match_confidence = round(max(min((top_score + max(score_gap, 0) * 0.5) / 260.0, 1.0), 0.0), 2)
+
     isrc = full.get("isrc") or top.get("isrc")
+
+    # Canonicalize by ISRC to avoid remix/regional variants from search ordering.
+    canonical_full = {}
+    canonical_track_id = None
+    if isrc:
+        try:
+            ids_obj = cm.get_track_ids_by_isrc(isrc) or {}
+            if isinstance(ids_obj, list):
+                ids_row = ids_obj[0] if ids_obj else {}
+            elif isinstance(ids_obj, dict):
+                ids_row = ids_obj
+            else:
+                ids_row = {}
+            cm_ids = ids_row.get("chartmetric_ids") or []
+            if cm_ids:
+                canonical_track_id = cm_ids[0]
+                canonical_full = cm.get_track(canonical_track_id) or {}
+        except Exception:
+            canonical_full = {}
+
+    label_source = canonical_full or full
+    album_record_label = ""
+    album_ids = label_source.get("album_ids") or []
+    release_dates = label_source.get("release_dates") or []
+
+    # Prioritize oldest known release to approximate the original master.
+    album_order: list[int] = []
+    if isinstance(album_ids, list) and album_ids:
+        if isinstance(release_dates, list) and len(release_dates) == len(album_ids):
+            paired = sorted(zip(release_dates, album_ids), key=lambda p: str(p[0] or "9999-99-99"))
+            album_order = [album_id for _, album_id in paired]
+        else:
+            album_order = list(album_ids)
+
+    for album_id in album_order[:5]:
+        try:
+            album_meta = cm.get_album(album_id) or {}
+        except Exception:
+            album_meta = {}
+        candidate = (album_meta.get("label") or "").strip()
+        if candidate:
+            album_record_label = candidate
+            break
+
+    album_label = (
+        label_source.get("album_label")
+        or top.get("album_label")
+    )
+    track_record_label = (
+        label_source.get("record_label")
+        or label_source.get("label")
+        or full.get("record_label")
+        or full.get("label")
+        or top.get("record_label")
+        or top.get("label")
+    )
     return {
-        "cm_track_id": top.get("id"),
-        "name": full.get("name") or top.get("name"),
+        "cm_track_id": canonical_track_id or top.get("id"),
+        "name": label_source.get("name") or full.get("name") or top.get("name"),
         "isrc": isrc,
-        "artist_names": full.get("artist_names") or top.get("artist_names") or [],
+        "artist_names": label_source.get("artist_names") or full.get("artist_names") or top.get("artist_names") or [],
+        "release_date": _extract_release_date(label_source),
+        "songwriters": _extract_songwriters(label_source),
+        "album_label": album_label,
+        "album_record_label": album_record_label,
+        "track_record_label": track_record_label,
+        "match_confidence": match_confidence,
     }
 
 
@@ -132,7 +428,7 @@ def normalize_sc_track(track):
     }
 
 
-def analyze_track_object(sc_track, clients):
+def analyze_track_object(sc_track, clients, original_isrc_override=None):
     """
     Core reusable per-track analysis function.
 
@@ -158,6 +454,7 @@ def analyze_track_object(sc_track, clients):
     original_career = (original_artist or {}).get("career", {})
     remix_career = (remix_artist or {}).get("career", {})
 
+    projections = project_revenue(sc_metrics.get("plays", 0))
     opportunity_score = build_opportunity_score(
         sc_metrics=sc_metrics,
         original_artist=original_artist or {},
@@ -166,12 +463,16 @@ def analyze_track_object(sc_track, clients):
         remix_geo=remix_geo,
         original_career=original_career,
         remix_career=remix_career,
+        revenue_projections=projections,
     )
 
-    original_track = find_original_isrc(cm, original_name, song_name) if original_name and song_name else None
+    original_track = None
+    if original_isrc_override:
+        original_track = resolve_track_by_isrc(cm, original_isrc_override)
+    if not original_track and original_name and song_name:
+        original_track = find_original_isrc(cm, original_name, song_name)
     original_isrc = (original_track or {}).get("isrc")
     luminate_data = fetch_luminate_by_isrc(lum, original_isrc)
-    projections = project_revenue(sc_metrics.get("plays", 0))
     viability = assess_viability(projections)
 
     return {
@@ -251,11 +552,23 @@ def discover_remixes(genre=None, min_plays=0, created_after=None, limit=30, clie
     return reports
 
 
-def process_catalog(filepath, limit_remixes=5, clients=None):
+def process_catalog(filepath, limit_remixes=5, min_plays=0, clients=None):
     """Option 1: Bulk catalog flow from CSV/XML."""
     records = parse_catalog_file(filepath)
+
+    # Deduplicate by ISRC so the same song uploaded twice doesn't get processed twice.
+    seen_isrcs: set[str] = set()
+    deduped: list[dict] = []
+    for r in records:
+        isrc = r.get("isrc")
+        if isrc:
+            if isrc in seen_isrcs:
+                continue
+            seen_isrcs.add(isrc)
+        deduped.append(r)
+
     all_reports = []
-    for record in records:
+    for record in deduped:
         artist = record.get("artist")
         title = record.get("title")
         if not title:
@@ -263,9 +576,15 @@ def process_catalog(filepath, limit_remixes=5, clients=None):
         reports = search_song_remixes(
             song_name=title, artist_name=artist, limit=limit_remixes, clients=clients
         )
+        if min_plays > 0:
+            reports = [
+                r for r in reports
+                if (r.get("sc_metrics") or {}).get("plays", 0) >= min_plays
+            ]
         all_reports.extend(reports)
-    dedup = {r.get("track_id"): r for r in all_reports}
-    ranked = list(dedup.values())
+
+    dedup_map = {r.get("track_id"): r for r in all_reports}
+    ranked = list(dedup_map.values())
     ranked.sort(key=lambda r: r.get("opportunity_score", {}).get("overall", 0), reverse=True)
     return ranked
 

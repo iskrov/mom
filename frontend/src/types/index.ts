@@ -6,8 +6,10 @@ export interface ArtistEnriched {
   name?: string
   sp_followers?: number
   sp_monthly_listeners?: number
+  tiktok_followers?: number
   career_stage?: string
   momentum?: string
+  record_label?: string
   geo_cities: Array<{ name: string; code2?: string; listeners?: number; affinity?: number }>
 }
 
@@ -17,6 +19,14 @@ export interface OpportunityScore {
   demand: number
   conversion: number
   momentum: number
+}
+
+export interface OriginalTrackEnriched {
+  cm_track_id?: number
+  isrc?: string
+  release_date?: string
+  songwriters: string[]
+  match_confidence?: number
 }
 
 export interface RevenueTier {
@@ -51,6 +61,7 @@ export interface TrackResult {
   opportunity_score: OpportunityScore
   remix_artist_enriched: ArtistEnriched
   original_artist_enriched: ArtistEnriched
+  original_track_enriched: OriginalTrackEnriched
   revenue: {
     projections: {
       conservative: RevenueTier
@@ -84,10 +95,12 @@ export interface SearchFilters {
   artistName: string
   songName: string
   songArtistName: string
+  isrcOverride: string
   scLink: string
   catalogLimitRemixes: number
+  catalogMinPlays: number
   tracksToFetch: number
-  sortBy: 'heat_score' | 'opportunity_score' | 'daily_velocity'
+  sortBy: 'heat_score' | 'opportunity_score' | 'daily_velocity' | 'likes'
   genre: string
   region: string
   careerStages: string[]

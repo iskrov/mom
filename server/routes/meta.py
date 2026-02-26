@@ -22,7 +22,7 @@ def get_ui_metadata():
             "genres": ["All", "Pop", "Hip-Hop", "EDM", "R&B", "Latin", "Dance & EDM", "Synthwave"],
             "regions": ["Global"],
             "career_stages": ["Developing", "Mid-level", "Established"],
-            "tracks_to_fetch": {"min": 10, "max": 100, "default": 10},
+            "tracks_to_fetch": {"min": 1, "max": 20, "default": 10},
             "account_reach": {"min": 0, "max": 500000, "default_min": 0, "default_max": 500000},
             "heat_score": {"min": 0.0, "max": 10.0, "default_min": 0.0, "default_max": 10.0},
         },

@@ -130,6 +130,11 @@ def _log_score(value, floor_value=1_000, cap_value=100_000_000):
     return _clamp((num / den) * 100.0)
 
 
+def _revenue_score(mid_revenue, floor_value=500.0, cap_value=500_000.0):
+    """Map mid-tier projected revenue to a 0-100 score on a log scale."""
+    return _log_score(mid_revenue, floor_value=floor_value, cap_value=cap_value)
+
+
 def _ratio_score(value):
     """Map followers/listeners style ratio to 0-100."""
     value = float(value or 0.0)
@@ -187,20 +192,38 @@ def compute_geo_divergence(cities_a, cities_b, top_n=10):
 
 
 def compute_demand_score(sc_metrics):
-    """Demand score from SoundCloud engagement signals."""
-    plays_score = _log_score(sc_metrics.get("plays"), floor_value=10_000, cap_value=10_000_000)
+    """Demand score from SoundCloud engagement signals.
+
+    Plays and likes together carry the most weight. Milestone bonuses
+    reward tracks that have crossed significant stream thresholds.
+    """
+    plays = sc_metrics.get("plays") or 0
+    likes = sc_metrics.get("likes") or 0
+    comments = sc_metrics.get("comments") or 0
+    reposts = sc_metrics.get("reposts") or 0
+
+    plays_score = _log_score(plays, floor_value=1_000, cap_value=10_000_000)
+    likes_score = _log_score(likes, floor_value=100, cap_value=1_000_000)
     engagement_score = _engagement_score(sc_metrics.get("engagement_rate"))
     velocity_score = _log_score(sc_metrics.get("daily_velocity"), floor_value=100, cap_value=20_000)
 
-    comments = sc_metrics.get("comments") or 0
-    reposts = sc_metrics.get("reposts") or 0
     bonus = 0.0
+    if plays >= 5_000_000:
+        bonus += 10.0
+    elif plays >= 1_000_000:
+        bonus += 5.0
     if comments > 100:
-        bonus += 5.0
+        bonus += 3.0
     if reposts > 50:
-        bonus += 5.0
+        bonus += 3.0
 
-    score = (plays_score * 0.40) + (engagement_score * 0.30) + (velocity_score * 0.30) + bonus
+    score = (
+        (plays_score * 0.45)
+        + (likes_score * 0.25)
+        + (engagement_score * 0.15)
+        + (velocity_score * 0.15)
+        + bonus
+    )
     return _clamp(score)
 
 
@@ -227,7 +250,10 @@ def compute_conversion_score(original_artist, remix_artist, original_geo, remix_
 
 
 def compute_momentum_score(original_career, remix_career):
-    """Momentum score from artist trajectory and stage-gap discovery bonus."""
+    """Momentum score from artist trajectory, stage-gap discovery bonus,
+    and the original artist's absolute career stage as a proxy for
+    commercial upside.
+    """
     remix_momentum_cat = _momentum_category_score(remix_career.get("momentum"))
     remix_momentum_raw = float(remix_career.get("momentum_score") or 50.0)
     remix_momentum = (remix_momentum_cat * 0.6) + (remix_momentum_raw * 0.4)
@@ -237,9 +263,12 @@ def compute_momentum_score(original_career, remix_career):
     if gap >= 3:
         stage_bonus = 20.0
     elif gap == 2:
-        stage_bonus = 10.0
+        stage_bonus = 12.0
     elif gap == 1:
-        stage_bonus = 5.0
+        stage_bonus = 6.0
+
+    # Original artist's absolute stage boosts commercial potential
+    orig_stage_score = _stage_rank(original_career.get("stage")) / 5.0 * 100.0
 
     penalty = 0.0
     remix_stage = (remix_career.get("stage") or "").strip().lower()
@@ -247,22 +276,32 @@ def compute_momentum_score(original_career, remix_career):
     if remix_stage == "mid-level" and remix_momentum_label in {"steady", "decline", "gradual decline"}:
         penalty = 15.0
 
-    return _clamp(remix_momentum + stage_bonus - penalty)
+    base = _clamp(remix_momentum + stage_bonus - penalty)
+    return _clamp(base * 0.70 + orig_stage_score * 0.30)
 
 
-def compute_opportunity_score(demand, conversion, momentum):
+def compute_opportunity_score(demand, conversion, momentum, revenue_score=0.0):
     """
     Compose overall Opportunity Score and decision label.
 
     Formula:
-        overall = demand*0.40 + conversion*0.35 + momentum*0.25
+        overall = demand*0.60 + revenue*0.20 + conversion*0.10 + momentum*0.10
+
+    SC stream count (via demand) and revenue projection together carry 80% of
+    the weight. Thresholds map to UI grades: A=8.5+ (85), B=7.0+ (70),
+    C=5.5+ (55), D=below 5.5.
     """
-    overall = _clamp((demand * 0.40) + (conversion * 0.35) + (momentum * 0.25))
-    if overall >= 80:
+    overall = _clamp(
+        (demand * 0.60)
+        + (revenue_score * 0.20)
+        + (conversion * 0.10)
+        + (momentum * 0.10)
+    )
+    if overall >= 85:
         label = "STRONG"
-    elif overall >= 60:
+    elif overall >= 70:
         label = "MODERATE"
-    elif overall >= 40:
+    elif overall >= 55:
         label = "MARGINAL"
     else:
         label = "WEAK"
@@ -276,9 +315,13 @@ def compute_opportunity_score(demand, conversion, momentum):
     }
 
 
-def build_opportunity_score(sc_metrics, original_artist, remix_artist, original_geo, remix_geo, original_career, remix_career):
+def build_opportunity_score(sc_metrics, original_artist, remix_artist, original_geo, remix_geo, original_career, remix_career, revenue_projections=None):
     """Convenience wrapper to compute full score payload in one call."""
     demand = compute_demand_score(sc_metrics)
     conversion = compute_conversion_score(original_artist, remix_artist, original_geo, remix_geo)
     momentum = compute_momentum_score(original_career, remix_career)
-    return compute_opportunity_score(demand, conversion, momentum)
+    mid_revenue = 0.0
+    if revenue_projections:
+        mid_revenue = (revenue_projections.get("mid") or {}).get("revenue", {}).get("all_dsps_avg", 0.0)
+    rev_score = _revenue_score(mid_revenue)
+    return compute_opportunity_score(demand, conversion, momentum, rev_score)

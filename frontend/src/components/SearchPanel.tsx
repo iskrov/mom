@@ -4,6 +4,7 @@ interface SearchPanelProps {
   filters: SearchFilters
   onFiltersChange: (next: SearchFilters) => void
   onSearch: () => void
+  onStopSearch: () => void
   isLoading: boolean
   activeMode: SearchMode
   catalogFileName?: string
@@ -11,7 +12,7 @@ interface SearchPanelProps {
   genreOptions: string[]
   regionOptions: string[]
   careerOptions: string[]
-  tracksRange: { min: number; max: number }
+  tracksRange: { min: number; max: number; step?: number }
   accountReachRange: { min: number; max: number }
   heatRange: { min: number; max: number }
   isSupportedMode: boolean
@@ -26,6 +27,7 @@ export function SearchPanel({
   filters,
   onFiltersChange,
   onSearch,
+  onStopSearch,
   isLoading,
   activeMode,
   catalogFileName,
@@ -80,6 +82,12 @@ export function SearchPanel({
               onChange={(e) => update('songArtistName', e.target.value)}
               placeholder="Original artist (optional)"
             />
+            <input
+              className="text-input stacked-input"
+              value={filters.isrcOverride}
+              onChange={(e) => update('isrcOverride', e.target.value)}
+              placeholder="ISRC override (optional)"
+            />
           </>
         )}
         {activeMode === 'sc_link_lookup' && (
@@ -110,6 +118,20 @@ export function SearchPanel({
                 onChange={(e) => update('catalogLimitRemixes', Number(e.target.value) || 1)}
               />
             </label>
+            <label className="checkbox-row">
+              <span>Min stream count</span>
+              <select
+                className="select-input"
+                value={filters.catalogMinPlays}
+                onChange={(e) => update('catalogMinPlays', Number(e.target.value))}
+              >
+                <option value={0}>Any</option>
+                <option value={10000}>10K+</option>
+                <option value={100000}>100K+</option>
+                <option value={500000}>500K+</option>
+                <option value={1000000}>1M+</option>
+              </select>
+            </label>
           </>
         )}
         {!isSupportedMode && placeholder && (
@@ -137,6 +159,11 @@ export function SearchPanel({
         <button className="search-btn" type="button" onClick={onSearch} disabled={isLoading || !isSupportedMode}>
           {isLoading ? 'SEARCHING...' : 'SEARCH'}
         </button>
+        {isLoading && (
+          <button className="stop-btn" type="button" onClick={onStopSearch}>
+            STOP SEARCH
+          </button>
+        )}
       </section>
 
       {isSupportedMode && (
@@ -148,6 +175,7 @@ export function SearchPanel({
                 type="range"
                 min={tracksRange.min}
                 max={tracksRange.max}
+                step={tracksRange.step ?? 1}
                 value={filters.tracksToFetch}
                 onChange={(e) => update('tracksToFetch', Number(e.target.value))}
               />
@@ -166,6 +194,7 @@ export function SearchPanel({
                 <option value="heat_score">Heat Score ↓</option>
                 <option value="opportunity_score">Opportunity Score ↓</option>
                 <option value="daily_velocity">Velocity ↓</option>
+                <option value="likes">Likes ↓</option>
               </select>
             </section>
           )}

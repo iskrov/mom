@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    __UI_BUILD_TS__: JSON.stringify(new Date().toISOString()),
+  },
   server: {
     proxy: {
       '/api': {

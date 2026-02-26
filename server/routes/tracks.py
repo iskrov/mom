@@ -5,43 +5,52 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 
 from scripts.pipeline import analyze_track_object, make_clients
+from scripts.platforms.musicbrainz import get_work_parties
 
 from server.schemas import LicensingResponse, TrackDetailRequest
 
 router = APIRouter(prefix="/api/tracks", tags=["tracks"])
 
 
-def _mock_split_entries(track_id: int) -> list[dict]:
-    """Return deterministic mock licensing entries for a track."""
-    base = [
-        ("Primary Rights Holder", "Sony Pub", "co-writer", 32.5),
-        ("Original Artist", "Warner Chappell", "artist", 22.5),
-        ("Remix Artist", "Independent", "remixer", 20.0),
-        ("Producer", "UMG", "producer", 15.0),
-        ("Co-Writer", "BMI", "co-writer", 10.0),
-    ]
-    # Light deterministic shuffle by track id.
-    offset = track_id % len(base)
-    rotated = base[offset:] + base[:offset]
+def _fallback_entries() -> list[dict]:
+    """Minimal placeholder returned when MusicBrainz has no data."""
     return [
         {
-            "party": row[0],
-            "publisher": row[1],
-            "role": row[2],
-            "share_pct": row[3],
+            "party": "Rights Holder",
+            "publisher": "Unknown",
+            "role": "writer",
+            "share_pct": 100.0,
         }
-        for row in rotated
     ]
 
 
 @router.get("/{track_id}/licensing", response_model=LicensingResponse)
-def get_licensing(track_id: int):
-    """Mock licensing response placeholder for later Royalti integration."""
+def get_licensing(track_id: int, song_title: str = "", artist_name: str = ""):
+    """
+    Return writer and publisher data for the original song via MusicBrainz.
+
+    Accepts song_title and artist_name as optional query parameters.
+    Falls back to a placeholder entry if MusicBrainz returns no results.
+    Split percentages are estimated (equal splits across writers/publishers).
+    """
+    if song_title and artist_name:
+        entries = get_work_parties(artist_name=artist_name, song_title=song_title)
+    else:
+        entries = []
+
+    if not entries:
+        entries = _fallback_entries()
+        split_set = "Placeholder — provide song_title and artist_name for real data"
+    elif all(e.get("role") == "master rights" for e in entries):
+        split_set = "MusicBrainz · label data only"
+    else:
+        split_set = "MusicBrainz · estimated splits"
+
     return LicensingResponse(
         track_id=track_id,
-        split_set="Mock split v1",
+        split_set=split_set,
         updated_at=datetime.now(timezone.utc).isoformat(),
-        entries=_mock_split_entries(track_id),
+        entries=entries,
     )
 
 

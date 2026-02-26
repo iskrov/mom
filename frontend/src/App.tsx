@@ -23,7 +23,7 @@ const DEFAULT_UI_META: UiMetadata = {
     genres: ['All', 'Pop', 'Hip-Hop', 'EDM', 'R&B', 'Latin'],
     regions: ['Global'],
     career_stages: ['Developing', 'Mid-level', 'Established'],
-    tracks_to_fetch: { min: 10, max: 100, default: 10 },
+    tracks_to_fetch: { min: 1, max: 20, default: 10 },
     account_reach: { min: 0, max: 500000, default_min: 0, default_max: 500000 },
     heat_score: { min: 0, max: 10, default_min: 0, default_max: 10 },
   },
@@ -58,7 +58,7 @@ function App() {
   const [loadingLicensing, setLoadingLicensing] = useState(false)
   const [uiMeta, setUiMeta] = useState<UiMetadata>(DEFAULT_UI_META)
 
-  const { filters, setFilters, results, rawResults, status, isLoading, error, runSearch } = useSearch()
+  const { filters, setFilters, results, rawResults, status, isLoading, error, runSearch, stopSearch } = useSearch()
   const isSupportedMode =
     activeMode === 'catalog_search' ||
     activeMode === 'artist_search' ||
@@ -97,7 +97,11 @@ function App() {
   useEffect(() => {
     if (!selectedTrack) return
     setLoadingLicensing(true)
-    fetchLicensing(selectedTrack.track_id)
+    fetchLicensing(
+      selectedTrack.track_id,
+      selectedTrack.original_song ?? undefined,
+      selectedTrack.original_artist ?? undefined,
+    )
       .then(setLicensing)
       .finally(() => setLoadingLicensing(false))
   }, [selectedTrack])
@@ -136,10 +140,15 @@ function App() {
           activeMode={activeMode}
           catalogFileName={catalogFile?.name}
           onCatalogFileChange={setCatalogFile}
+          onStopSearch={stopSearch}
           genreOptions={uiMeta.filters.genres}
           regionOptions={uiMeta.filters.regions}
           careerOptions={uiMeta.filters.career_stages}
-          tracksRange={{ min: uiMeta.filters.tracks_to_fetch.min, max: uiMeta.filters.tracks_to_fetch.max }}
+          tracksRange={
+            activeMode === 'catalog_search'
+              ? { min: 5, max: 100, step: 5 }
+              : { min: uiMeta.filters.tracks_to_fetch.min, max: uiMeta.filters.tracks_to_fetch.max, step: 1 }
+          }
           accountReachRange={{ min: uiMeta.filters.account_reach.min, max: uiMeta.filters.account_reach.max }}
           heatRange={{ min: uiMeta.filters.heat_score.min, max: uiMeta.filters.heat_score.max }}
           isSupportedMode={isSupportedMode}

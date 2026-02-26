@@ -1,14 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
 
-import { analyzeScUrl, runCatalogSearch, streamArtistSearch, streamSongSearch } from '../api/client'
+import { analyzeScUrl, streamArtistSearch, streamCatalogSearch, streamSongSearch } from '../api/client'
 import type { SearchFilters, SearchMode, TrackResult } from '../types'
 
 const DEFAULT_FILTERS: SearchFilters = {
-  artistName: 'Miley Cyrus',
-  songName: 'Flowers',
-  songArtistName: 'Miley Cyrus',
+  artistName: 'Ed Sheeran',
+  songName: 'Shape of You',
+  songArtistName: 'Ed Sheeran',
+  isrcOverride: '',
   scLink: '',
   catalogLimitRemixes: 5,
+  catalogMinPlays: 0,
   tracksToFetch: 10,
   sortBy: 'heat_score',
   genre: 'All',
@@ -91,14 +93,30 @@ export function useSearch() {
           setStatus('Catalog file required.')
           return
         }
-        setStatus('Processing catalog upload...')
-        const catalogResults = await runCatalogSearch(
+        setStatus('Reading catalog...')
+        await streamCatalogSearch(
           options.catalogFile,
           filters.catalogLimitRemixes,
+          filters.catalogMinPlays,
+          {
+            onStatus: (payload) => {
+              const p = payload as { message: string; count?: number; song?: string; index?: number; total?: number }
+              if (p.message === 'catalog_loaded') {
+                setStatus(`${p.count ?? 0} songs loaded. Starting search...`)
+              } else if (p.message === 'processing_song') {
+                setStatus(`Song ${p.index ?? '?'} / ${p.total ?? '?'}: ${p.song ?? ''} — finding remixes...`)
+              }
+            },
+            onTrack: (track) => {
+              setResults((prev) => [...prev, track])
+            },
+            onComplete: (all) => {
+              setResults(all)
+              setStatus(`Complete: ${all.length} remixes found`)
+            },
+          },
           abortController.signal,
         )
-        setResults(catalogResults)
-        setStatus(`Complete: ${catalogResults.length} tracks`)
       } else {
         setStatus('This workflow is coming soon.')
         setResults([])
@@ -144,6 +162,12 @@ export function useSearch() {
     return filtered
   }, [filters, results])
 
+  const stopSearch = () => {
+    abortRef.current?.abort()
+    setIsLoading(false)
+    setStatus('Search stopped.')
+  }
+
   return {
     filters,
     setFilters,
@@ -153,5 +177,6 @@ export function useSearch() {
     isLoading,
     error,
     runSearch,
+    stopSearch,
   }
 }

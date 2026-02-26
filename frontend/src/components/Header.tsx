@@ -28,6 +28,12 @@ export function Header({
 }: HeaderProps) {
   const normalizeGroup = (value: string) => value.trim().replace(/\s+/g, ' ').toUpperCase()
   let prevGroup = ''
+  const buildStamp = new Date(__UI_BUILD_TS__).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 
   return (
     <header className="app-header">
@@ -61,6 +67,7 @@ export function Header({
       </nav>
 
       <div className="header-right">
+        <span className="build-stamp">UI {buildStamp}</span>
         <span className="org-name">{organization}</span>
         <div className="avatar">JL</div>
         <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
