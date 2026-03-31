@@ -55,6 +55,8 @@ export function SearchPanel({
               ? 'SONG SEARCH'
               : activeMode === 'sc_link_lookup'
                 ? 'SC LINK LOOKUP'
+                : activeMode === 'catalog_scatter'
+                  ? 'CATALOG GRAPH'
                 : 'WORKFLOW'}
         </div>
         {activeMode === 'artist_search' && (
@@ -66,6 +68,20 @@ export function SearchPanel({
               placeholder="Miley Cyrus"
             />
             <div className="helper-text">IPI / IPN / ISNI</div>
+            <label className="checkbox-row">
+              <span>Min stream count</span>
+              <select
+                className="select-input"
+                value={filters.artistMinPlays}
+                onChange={(e) => update('artistMinPlays', Number(e.target.value))}
+              >
+                <option value={0}>Any</option>
+                <option value={10000}>10K+</option>
+                <option value={100000}>100K+</option>
+                <option value={500000}>500K+</option>
+                <option value={1000000}>1M+</option>
+              </select>
+            </label>
           </>
         )}
         {activeMode === 'song_search' && (
@@ -88,6 +104,20 @@ export function SearchPanel({
               onChange={(e) => update('isrcOverride', e.target.value)}
               placeholder="ISRC override (optional)"
             />
+            <label className="checkbox-row">
+              <span>Min stream count</span>
+              <select
+                className="select-input"
+                value={filters.songMinPlays}
+                onChange={(e) => update('songMinPlays', Number(e.target.value))}
+              >
+                <option value={0}>Any</option>
+                <option value={10000}>10K+</option>
+                <option value={100000}>100K+</option>
+                <option value={500000}>500K+</option>
+                <option value={1000000}>1M+</option>
+              </select>
+            </label>
           </>
         )}
         {activeMode === 'sc_link_lookup' && (
@@ -98,7 +128,7 @@ export function SearchPanel({
             placeholder="https://soundcloud.com/artist/track"
           />
         )}
-        {activeMode === 'catalog_search' && (
+        {(activeMode === 'catalog_search' || activeMode === 'catalog_scatter') && (
           <>
             <input
               className="text-input"
@@ -131,6 +161,26 @@ export function SearchPanel({
                 <option value={500000}>500K+</option>
                 <option value={1000000}>1M+</option>
               </select>
+            </label>
+            <label className="checkbox-row">
+              <span>Start at song #</span>
+              <input
+                className="compact-number"
+                type="number"
+                min={1}
+                value={filters.catalogOffset + 1}
+                onChange={(e) => update('catalogOffset', Math.max(0, (Number(e.target.value) || 1) - 1))}
+              />
+            </label>
+            <label className="checkbox-row">
+              <span>Max songs (0 = all)</span>
+              <input
+                className="compact-number"
+                type="number"
+                min={0}
+                value={filters.catalogCount}
+                onChange={(e) => update('catalogCount', Math.max(0, Number(e.target.value) || 0))}
+              />
             </label>
           </>
         )}
@@ -193,6 +243,7 @@ export function SearchPanel({
               >
                 <option value="heat_score">Heat Score ↓</option>
                 <option value="opportunity_score">Opportunity Score ↓</option>
+                <option value="plays">Streams ↓</option>
                 <option value="daily_velocity">Velocity ↓</option>
                 <option value="likes">Likes ↓</option>
               </select>

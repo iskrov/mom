@@ -51,7 +51,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 # SoundCloud uses an unofficial public client_id extracted from their web app.
 # This is NOT an official OAuth credential — it could break at any time.
 # If the hackathon provides official SoundCloud creds, replace this.
-SC_CLIENT_ID = "CkCiIyf14rHi27fhk7HxhPOzc85okfSJ"
+SC_CLIENT_ID = "b73paRnaV82c1ypnjCCsgrFwg47vYs8a"
 SC_BASE = "https://api-v2.soundcloud.com"
 
 # SoundCloud's api-v2 rejects requests without browser-like headers.

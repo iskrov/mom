@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -23,6 +28,7 @@ router = APIRouter(prefix="/api", tags=["search"])
 _NUMERIC_PREFIX_RE = re.compile(r"^\d{4,}\s+")
 _LABEL_SPLIT_RE = re.compile(r"\s*[|;/]\s*")
 _COUNTRY_SUFFIX_RE = re.compile(r"\b[A-Z]{2,3}$")
+_REMIX_HINT_RE = re.compile(r"\b(remix|edit|bootleg|flip|mashup|rework|vip)\b", re.IGNORECASE)
 
 
 def _score_label_candidate(label: str) -> int:
@@ -98,6 +104,72 @@ def _classify_heat_trend(sc_metrics: dict) -> str:
     return "steady"
 
 
+def _find_original_reference_track(sc, song_name: str, artist_name: str | None) -> dict | None:
+    """Find likely original SoundCloud track for the song query."""
+    song_q = (song_name or "").strip()
+    artist_q = (artist_name or "").strip()
+    if not song_q:
+        return None
+
+    queries = [f"{artist_q} {song_q}" if artist_q else song_q, song_q]
+    seen_ids: set[int] = set()
+    candidates: list[dict] = []
+
+    for query in queries:
+        if not query:
+            continue
+        for track in sc.search_tracks(query=query, limit=15):
+            tid = track.get("id")
+            if not tid or tid in seen_ids:
+                continue
+            seen_ids.add(tid)
+            candidates.append(track)
+
+    if not candidates:
+        return None
+
+    song_lower = song_q.lower()
+    artist_tokens = [tok for tok in artist_q.lower().replace("&", " ").split() if len(tok) > 2]
+
+    def _score(track: dict) -> int:
+        title = (track.get("title") or "").lower()
+        user = ((track.get("user") or {}).get("username") or "").lower()
+        score = 0
+
+        if song_lower == title:
+            score += 120
+        elif song_lower in title:
+            score += 80
+
+        if title and _REMIX_HINT_RE.search(title):
+            score -= 160
+
+        if artist_tokens:
+            matches = sum(1 for tok in artist_tokens if tok in title or tok in user)
+            score += matches * 40
+
+        score += min(int(track.get("playback_count") or 0) // 1_000_000, 30)
+        return score
+
+    ranked = sorted(candidates, key=_score, reverse=True)
+    top = ranked[0]
+    if _score(top) < 40:
+        return None
+    return top
+
+
+def _pick_original_artist(original_track: dict, parsed: dict) -> str | None:
+    """Return the best available original artist name.
+
+    Prefers the artist_names list from the Chartmetric track (populated via
+    ISRC lookup) over the title-parsed string, which is unreliable.
+    """
+    names = (original_track or {}).get("artist_names") or []
+    if names:
+        return " & ".join(names) if len(names) > 1 else names[0]
+    return parsed.get("original_artist")
+
+
 def _summarize_report(report: dict) -> dict:
     """Convert raw pipeline report into API-friendly shape."""
     parsed = report.get("parsed_title", {})
@@ -141,7 +213,7 @@ def _summarize_report(report: dict) -> dict:
         "genre": report.get("track_genre"),
         "created_at": sc_track.get("created_at"),
         "remix_artist": parsed.get("remix_artist") or sc_user.get("username"),
-        "original_artist": parsed.get("original_artist"),
+        "original_artist": _pick_original_artist(original_track, parsed),
         "sc_user": {
             "username": sc_user.get("username"),
             "followers_count": sc_user.get("followers_count") or 0,
@@ -203,14 +275,19 @@ def search_artist(payload: ArtistSearchRequest):
     def stream():
         yield _sse_event("status", {"message": "search_started", "artist": payload.artist_name})
         seed_tracks = sc.search_tracks(query=f"{payload.artist_name} remix", limit=payload.tracks_to_fetch)
+        if payload.min_plays > 0:
+            seed_tracks = [track for track in seed_tracks if (track.get("playback_count") or 0) >= payload.min_plays]
         yield _sse_event("status", {"message": "tracks_found", "count": len(seed_tracks)})
 
         reports: list[dict] = []
         for idx, track in enumerate(seed_tracks, start=1):
-            report = analyze_track_object(track, clients)
-            item = _summarize_report(report)
-            reports.append(item)
-            yield _sse_event("track", {"index": idx, "total": len(seed_tracks), "track": item})
+            try:
+                report = analyze_track_object(track, clients)
+                item = _summarize_report(report)
+                reports.append(item)
+                yield _sse_event("track", {"index": idx, "total": len(seed_tracks), "track": item})
+            except Exception as exc:
+                yield _sse_event("status", {"message": "track_failed", "index": idx, "error": str(exc)})
 
         reverse = payload.sort_desc
         sort_key = payload.sort_by if payload.sort_by in {"heat_score", "plays", "likes", "daily_velocity"} else "heat_score"
@@ -232,17 +309,50 @@ def search_song(payload: SongSearchRequest):
     def stream():
         yield _sse_event("status", {"message": "search_started", "song": payload.song_name})
         tracks = sc.search_remixes(payload.song_name, artist=payload.artist_name, limit=payload.tracks_to_fetch)
+        if payload.min_plays > 0:
+            tracks = [track for track in tracks if (track.get("playback_count") or 0) >= payload.min_plays]
         yield _sse_event("status", {"message": "tracks_found", "count": len(tracks)})
 
         reports: list[dict] = []
-        for idx, track in enumerate(tracks, start=1):
-            report = analyze_track_object(track, clients, original_isrc_override=payload.isrc_override)
-            item = _summarize_report(report)
-            reports.append(item)
-            yield _sse_event("track", {"index": idx, "total": len(tracks), "track": item})
+        reference_row: dict | None = None
 
-        reports.sort(key=lambda row: row.get("heat_score") or 0, reverse=True)
-        yield _sse_event("complete", {"count": len(reports), "results": reports})
+        try:
+            reference_track = _find_original_reference_track(sc, payload.song_name, payload.artist_name)
+            if reference_track:
+                reference_report = analyze_track_object(
+                    reference_track,
+                    clients,
+                    original_isrc_override=payload.isrc_override,
+                )
+                reference_row = _summarize_report(reference_report)
+                reference_row["is_reference_original"] = True
+                if payload.artist_name and not reference_row.get("original_artist"):
+                    reference_row["original_artist"] = payload.artist_name
+                if payload.artist_name and not reference_row.get("remix_artist"):
+                    reference_row["remix_artist"] = payload.artist_name
+                reports.append(reference_row)
+                yield _sse_event("track", {"index": 0, "total": len(tracks), "track": reference_row})
+        except Exception as exc:
+            yield _sse_event("status", {"message": "reference_track_failed", "error": str(exc)})
+
+        seen_ids = {reference_row.get("track_id")} if reference_row else set()
+        for idx, track in enumerate(tracks, start=1):
+            try:
+                report = analyze_track_object(track, clients, original_isrc_override=payload.isrc_override)
+                item = _summarize_report(report)
+                item["is_reference_original"] = False
+                if item.get("track_id") in seen_ids:
+                    continue
+                seen_ids.add(item.get("track_id"))
+                reports.append(item)
+                yield _sse_event("track", {"index": idx, "total": len(tracks), "track": item})
+            except Exception as exc:
+                yield _sse_event("status", {"message": "track_failed", "index": idx, "error": str(exc)})
+
+        remix_reports = [row for row in reports if not row.get("is_reference_original")]
+        remix_reports.sort(key=lambda row: row.get("heat_score") or 0, reverse=True)
+        final_reports = ([reference_row] if reference_row else []) + remix_reports
+        yield _sse_event("complete", {"count": len(final_reports), "results": final_reports})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
@@ -257,7 +367,7 @@ def analyze_url(payload: AnalyzeUrlRequest):
 
 
 @router.post("/search/catalog")
-async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form(5), min_plays: int = Form(0)):
+async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form(5), min_plays: int = Form(0), offset: int = Form(0), count: int = Form(0)):
     """
     Catalog workflow — SSE stream of enriched remix results per song.
 
@@ -281,7 +391,12 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
         tmp.write(data)
         temp_path = tmp.name
 
+    # How long to wait for a single song before skipping it.
+    # Default: 45s per remix slot + 30s buffer. Tune via ?song_timeout=N if needed.
+    song_timeout_secs = safe_limit * 45 + 30
+
     def stream():
+        executor = ThreadPoolExecutor(max_workers=1)
         try:
             records = parse_catalog_file(temp_path)
 
@@ -297,6 +412,11 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
                 deduped.append(r)
 
             songs = [r for r in deduped if r.get("title")]
+            safe_offset = max(0, int(offset or 0))
+            safe_count = max(0, int(count or 0))
+            if safe_offset > 0 or safe_count > 0:
+                end = (safe_offset + safe_count) if safe_count > 0 else None
+                songs = songs[safe_offset:end]
             yield _sse_event("status", {"message": "catalog_loaded", "count": len(songs)})
 
             clients = make_clients()
@@ -305,6 +425,8 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
             for idx, record in enumerate(songs, start=1):
                 title = record["title"]
                 artist = record.get("artist")
+                logger.info("catalog [%d/%d] starting: %r by %r", idx, len(songs), title, artist)
+                song_t0 = time.perf_counter()
                 yield _sse_event("status", {
                     "message": "processing_song",
                     "song": title,
@@ -312,16 +434,45 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
                     "total": len(songs),
                 })
 
-                reports = search_song_remixes(
-                    song_name=title, artist_name=artist,
-                    limit=safe_limit, clients=clients,
+                future = executor.submit(
+                    search_song_remixes,
+                    title, artist, safe_limit, clients, safe_min_plays,
+                    record.get("isrc"),
                 )
-                if safe_min_plays > 0:
-                    reports = [
-                        r for r in reports
-                        if (r.get("sc_metrics") or {}).get("plays", 0) >= safe_min_plays
-                    ]
+                try:
+                    reports = future.result(timeout=song_timeout_secs)
+                except FuturesTimeoutError:
+                    logger.warning(
+                        "catalog [%d/%d] TIMEOUT after %ds, skipping: %r",
+                        idx, len(songs), song_timeout_secs, title,
+                    )
+                    yield _sse_event("status", {
+                        "message": "song_skipped",
+                        "reason": "timeout",
+                        "song": title,
+                        "index": idx,
+                        "total": len(songs),
+                    })
+                    continue
+                except Exception as exc:
+                    logger.warning(
+                        "catalog [%d/%d] ERROR, skipping: %r — %s",
+                        idx, len(songs), title, exc,
+                    )
+                    yield _sse_event("status", {
+                        "message": "song_skipped",
+                        "reason": "error",
+                        "song": title,
+                        "index": idx,
+                        "total": len(songs),
+                        "error": str(exc),
+                    })
+                    continue
 
+                logger.info(
+                    "catalog [%d/%d] done: %r  found=%d  elapsed=%.1fs",
+                    idx, len(songs), title, len(reports), time.perf_counter() - song_t0,
+                )
                 for report in reports:
                     item = _summarize_report(report)
                     all_items.append(item)
@@ -335,6 +486,7 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
             )
             yield _sse_event("complete", {"count": len(ranked), "results": list(ranked)})
         finally:
+            executor.shutdown(wait=False)
             path_obj = Path(temp_path)
             if path_obj.exists():
                 path_obj.unlink()

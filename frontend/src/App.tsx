@@ -1,23 +1,30 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import './App.css'
 
 import { fetchLicensing, fetchUiMetadata } from './api/client'
 import { Header } from './components/Header'
 import { ResultsTable } from './components/ResultsTable'
+import { ScatterPlotView } from './components/ScatterPlotView'
 import { SearchPanel } from './components/SearchPanel'
+import { SongCasePage } from './components/SongCasePage'
 import { SummaryBar } from './components/SummaryBar'
 import { TrackDetail } from './components/TrackDetail'
+import { WatchList } from './components/WatchList'
 import { useSearch } from './hooks/useSearch'
-import type { LicensingPayload, SearchMode, TrackResult, UiMetadata } from './types'
+import type { LicensingPayload, SearchMode, SongCaseData, TrackResult, UiMetadata, WatchListEntry } from './types'
+import { downloadResultsAsCsv } from './utils/exportCsv'
 
 const DEFAULT_UI_META: UiMetadata = {
   organization: 'Warner Music Group',
   default_mode: 'artist_search',
   tabs: [
     { group: 'RIGHTSHOLDER', label: 'Catalog Search', key: 'catalog_search', active: false },
+    { group: 'RIGHTSHOLDER', label: 'Catalog Graph', key: 'catalog_scatter', active: false },
     { group: 'RIGHTSHOLDER', label: 'Artist Search', key: 'artist_search', active: true },
     { group: 'RIGHTSHOLDER', label: 'Song Search', key: 'song_search', active: false },
     { group: 'DISCOVERY', label: 'Remix Browse', key: 'remix_browse', active: false },
     { group: 'DISCOVERY', label: 'SC Link Lookup', key: 'sc_link_lookup', active: false },
+    { group: 'DISCOVERY', label: 'Song Case', key: 'song_case', active: false },
   ],
   filters: {
     genres: ['All', 'Pop', 'Hip-Hop', 'EDM', 'R&B', 'Latin'],
@@ -58,9 +65,15 @@ function App() {
   const [loadingLicensing, setLoadingLicensing] = useState(false)
   const [uiMeta, setUiMeta] = useState<UiMetadata>(DEFAULT_UI_META)
 
+  const [activeSongCase, setActiveSongCase] = useState<SongCaseData | null>(null)
+  const [watchList, setWatchList] = useState<WatchListEntry[]>([])
+  const [showWatchList, setShowWatchList] = useState(false)
+
   const { filters, setFilters, results, rawResults, status, isLoading, error, runSearch, stopSearch } = useSearch()
+  const isSongCase = activeMode === 'song_case'
   const isSupportedMode =
     activeMode === 'catalog_search' ||
+    activeMode === 'catalog_scatter' ||
     activeMode === 'artist_search' ||
     activeMode === 'song_search' ||
     activeMode === 'sc_link_lookup'
@@ -81,6 +94,7 @@ function App() {
           'artist_search'
         if (
           selected === 'catalog_search' ||
+          selected === 'catalog_scatter' ||
           selected === 'artist_search' ||
           selected === 'song_search' ||
           selected === 'remix_browse' ||
@@ -111,6 +125,24 @@ function App() {
     setLicensing(null)
   }, [activeMode])
 
+  const navTabs = useMemo(() => {
+    const hasScatter = uiMeta.tabs.some((tab) => tab.key === 'catalog_scatter')
+    if (hasScatter) return uiMeta.tabs
+    const tabs = [...uiMeta.tabs]
+    const catalogIndex = tabs.findIndex((tab) => tab.key === 'catalog_search')
+    const scatterTab = {
+      group: 'RIGHTSHOLDER',
+      label: 'Catalog Graph',
+      key: 'catalog_scatter',
+      active: false,
+    }
+    if (catalogIndex >= 0) {
+      tabs.splice(catalogIndex + 1, 0, scatterTab)
+      return tabs
+    }
+    return [scatterTab, ...tabs]
+  }, [uiMeta.tabs])
+
   const handleToggleTrackSelect = (track: TrackResult) => {
     setSelectedTrack((prev) => {
       if (prev?.track_id === track.track_id) {
@@ -121,15 +153,39 @@ function App() {
     })
   }
 
+  const handleOpenCasePage = (track: TrackResult) => {
+    const originalSong = track.original_song
+    const referenceRow = results.find((r) => r.is_reference_original && r.original_song === originalSong)
+    const original = referenceRow ?? track
+    const unofficialRemixes = results
+      .filter((r) => !r.is_reference_original && r.original_song === originalSong && r.track_id !== original.track_id)
+      .sort((a, b) => b.plays - a.plays)
+    setActiveSongCase({ original, unofficialRemixes })
+    setActiveMode('song_case')
+  }
+
+  const handleAddToWatchList = (entry: WatchListEntry) => {
+    setWatchList((prev) => {
+      if (prev.some((e) => e.id === entry.id)) return prev
+      return [...prev, entry]
+    })
+  }
+
+  const handleRemoveFromWatchList = (id: string) => {
+    setWatchList((prev) => prev.filter((e) => e.id !== id))
+  }
+
   return (
     <div className="app-shell">
       <Header
         isDark={isDark}
         onToggleTheme={() => setIsDark((prev) => !prev)}
         organization={uiMeta.organization}
-        tabs={uiMeta.tabs}
+        tabs={navTabs}
         activeMode={activeMode}
         onSelectMode={setActiveMode}
+        watchListCount={watchList.length}
+        onOpenWatchList={() => setShowWatchList((prev) => !prev)}
       />
       <div className={`content-grid ${showDetailPanel ? 'with-detail' : 'no-detail'}`}>
         <SearchPanel
@@ -145,8 +201,10 @@ function App() {
           regionOptions={uiMeta.filters.regions}
           careerOptions={uiMeta.filters.career_stages}
           tracksRange={
-            activeMode === 'catalog_search'
+            activeMode === 'catalog_search' || activeMode === 'catalog_scatter'
               ? { min: 5, max: 100, step: 5 }
+              : activeMode === 'artist_search'
+                ? { min: 1, max: 200, step: 1 }
               : { min: uiMeta.filters.tracks_to_fetch.min, max: uiMeta.filters.tracks_to_fetch.max, step: 1 }
           }
           accountReachRange={{ min: uiMeta.filters.account_reach.min, max: uiMeta.filters.account_reach.max }}
@@ -155,17 +213,55 @@ function App() {
           placeholder={placeholder}
         />
         <main className="main-content">
+          {isSongCase && activeSongCase ? (
+            <SongCasePage
+              data={activeSongCase}
+              onAddToWatchList={handleAddToWatchList}
+              onClose={() => setActiveMode('catalog_search')}
+            />
+          ) : (
+          <>
           <div className="status-row">
             <span>{status}</span>
             {error && <span className="status-error"> · {error}</span>}
+            {results.length > 0 && (
+              <button
+                className="download-btn"
+                type="button"
+                onClick={() => {
+                  const base = catalogFile
+                    ? catalogFile.name.replace(/\.[^.]+$/, '')
+                    : 'catalog'
+                  const plays = filters.catalogMinPlays
+                    ? `min${(filters.catalogMinPlays / 1000).toFixed(0)}k`
+                    : 'anyplays'
+                  const start = `song${filters.catalogOffset + 1}`
+                  const max = filters.catalogCount > 0 ? `x${filters.catalogCount}` : 'xall'
+                  downloadResultsAsCsv(results, `${base}_${plays}_${start}${max}_remix-radar.csv`)
+                }}
+              >
+                Download CSV ({results.length})
+              </button>
+            )}
           </div>
           {isSupportedMode ? (
             <>
-              <SummaryBar tracks={results} totalFound={rawResults.length} />
+              <SummaryBar
+                tracks={results}
+                totalFound={rawResults.filter((row) => !row.is_reference_original).length}
+              />
+              {activeMode === 'catalog_scatter' && (
+                <ScatterPlotView
+                  rows={results}
+                  selectedTrackId={selectedTrack?.track_id ?? null}
+                  onSelectTrack={handleToggleTrackSelect}
+                />
+              )}
               <ResultsTable
                 rows={results}
                 selectedTrackId={selectedTrack?.track_id ?? null}
                 onToggleTrackSelect={handleToggleTrackSelect}
+                onOpenCasePage={handleOpenCasePage}
               />
             </>
           ) : (
@@ -179,6 +275,8 @@ function App() {
               </ul>
             </section>
           )}
+          </>
+          )}
         </main>
         {showDetailPanel && (
           <TrackDetail
@@ -189,6 +287,13 @@ function App() {
               setSelectedTrack(null)
               setLicensing(null)
             }}
+          />
+        )}
+        {showWatchList && (
+          <WatchList
+            entries={watchList}
+            onRemove={handleRemoveFromWatchList}
+            onClose={() => setShowWatchList(false)}
           />
         )}
       </div>

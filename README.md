@@ -29,6 +29,20 @@ python -m scripts.pipeline "https://soundcloud.com/artist/track"
 python -m scripts.pipeline
 ```
 
+### One-Command Dev Restart
+
+Restart backend + frontend and open the app in browser:
+
+```bash
+./dev-reset.sh
+```
+
+Optional port overrides:
+
+```bash
+BACKEND_PORT=8001 FRONTEND_PORT=5174 ./dev-reset.sh
+```
+
 **Requirements:** `.env` in project root with `CHARTMETRIC_REFRESH_TOKEN`, `LUMINATE_API_KEY`, `LUMINATE_EMAIL`, `LUMINATE_PASSWORD`. See [Conventions](#conventions) for setup.
 
 ### Scripts Layout

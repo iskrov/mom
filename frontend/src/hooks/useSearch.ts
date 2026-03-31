@@ -5,12 +5,16 @@ import type { SearchFilters, SearchMode, TrackResult } from '../types'
 
 const DEFAULT_FILTERS: SearchFilters = {
   artistName: 'Ed Sheeran',
+  artistMinPlays: 0,
   songName: 'Shape of You',
   songArtistName: 'Ed Sheeran',
   isrcOverride: '',
+  songMinPlays: 0,
   scLink: '',
   catalogLimitRemixes: 5,
   catalogMinPlays: 0,
+  catalogOffset: 0,
+  catalogCount: 0,
   tracksToFetch: 10,
   sortBy: 'heat_score',
   genre: 'All',
@@ -87,7 +91,7 @@ export function useSearch() {
         const report = await analyzeScUrl(filters.scLink)
         setResults([report])
         setStatus('Complete: 1 track')
-      } else if (mode === 'catalog_search') {
+      } else if (mode === 'catalog_search' || mode === 'catalog_scatter') {
         if (!options?.catalogFile) {
           setError('Please select a .csv or .xml catalog file first.')
           setStatus('Catalog file required.')
@@ -98,6 +102,8 @@ export function useSearch() {
           options.catalogFile,
           filters.catalogLimitRemixes,
           filters.catalogMinPlays,
+          filters.catalogOffset,
+          filters.catalogCount,
           {
             onStatus: (payload) => {
               const p = payload as { message: string; count?: number; song?: string; index?: number; total?: number }
@@ -154,6 +160,8 @@ export function useSearch() {
     )
 
     filtered.sort((a, b) => {
+      if (a.is_reference_original && !b.is_reference_original) return -1
+      if (!a.is_reference_original && b.is_reference_original) return 1
       if (filters.sortBy === 'opportunity_score') {
         return b.opportunity_score.overall - a.opportunity_score.overall
       }

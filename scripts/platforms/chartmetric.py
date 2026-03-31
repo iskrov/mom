@@ -15,11 +15,14 @@ Usage:
     ids = cm.get_artist_platform_ids(artist["id"])
 """
 
+import logging
 import time
 
 import requests
 
 from scripts.config import cfg
+
+logger = logging.getLogger(__name__)
 
 
 class ChartmetricClient:
@@ -27,17 +30,41 @@ class ChartmetricClient:
 
     def __init__(self):
         self.base = cfg.CM_BASE
+        self._artist_cache: dict = {}     # keyed by lowercased name, lives for one request
+        self._track_isrc_cache: dict = {} # keyed by uppercased ISRC, lives for one request
 
     def _get(self, path, params=None):
-        """Authenticated GET with rate-limit throttling (0.3s between calls)."""
+        """Authenticated GET with rate-limit throttling (0.3s between calls).
+
+        Automatically retries once on 401 with a fresh token in case the
+        cached token expired mid-run (e.g. during a long catalog search).
+        """
         token = cfg.cm_token()
         time.sleep(cfg.CM_RATE_LIMIT_DELAY)
+        logger.debug("CM →  %s", path)
+        t0 = time.perf_counter()
         resp = requests.get(
             f"{self.base}{path}",
             headers={"Authorization": f"Bearer {token}"},
             params=params or {},
             timeout=30,
         )
+        elapsed = time.perf_counter() - t0
+        logger.debug("CM ←  %s  %.2fs  HTTP %s", path, elapsed, resp.status_code)
+
+        if resp.status_code == 401:
+            logger.warning("CM 401 on %s — forcing token refresh and retrying", path)
+            cfg._tokens.pop("cm", None)
+            token = cfg.cm_token()
+            time.sleep(cfg.CM_RATE_LIMIT_DELAY)
+            resp = requests.get(
+                f"{self.base}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params or {},
+                timeout=30,
+            )
+            logger.debug("CM ←  %s (retry)  %.2fs  HTTP %s", path, time.perf_counter() - t0, resp.status_code)
+
         resp.raise_for_status()
         return resp.json()
 

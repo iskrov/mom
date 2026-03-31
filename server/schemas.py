@@ -7,7 +7,8 @@ class ArtistSearchRequest(BaseModel):
     """Payload for artist-first remix discovery search."""
 
     artist_name: str = Field(min_length=1, description="Original artist name.")
-    tracks_to_fetch: int = Field(default=10, ge=1, le=20)
+    min_plays: int = Field(default=0, ge=0)
+    tracks_to_fetch: int = Field(default=10, ge=1, le=200)
     sort_by: str = Field(default="heat_score")
     sort_desc: bool = Field(default=True)
     genre_filter: list[str] = Field(default_factory=list)
@@ -27,6 +28,7 @@ class SongSearchRequest(BaseModel):
     song_name: str = Field(min_length=1)
     artist_name: str | None = None
     isrc_override: str | None = None
+    min_plays: int = Field(default=0, ge=0)
     tracks_to_fetch: int = Field(default=10, ge=1, le=20)
     enrich_chartmetric: bool = Field(default=True)
     check_official_release: bool = Field(default=False)

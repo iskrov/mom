@@ -8,8 +8,12 @@ This module now exposes reusable analysis functions suitable for both:
 """
 
 import argparse
+import logging
 import re
+import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from scripts.catalog import parse_catalog_file
 from scripts.config import cfg
@@ -27,6 +31,9 @@ DEFAULT_URL = "https://soundcloud.com/revelriesmusic/blinding_lights"
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9\s]+")
 _SPACE_RE = re.compile(r"\s+")
+# Splits "The Chainsmokers & Coldplay" or "Calvin Harris feat. Rihanna" into individual names.
+# Requires whitespace on both sides so "R&B" or "Guns N' Roses" are not split.
+_COLLAB_RE = re.compile(r"\s+(?:&|feat\.?|ft\.?)\s+", re.IGNORECASE)
 _REMIX_MARKERS = {
     "remix",
     "edit",
@@ -106,6 +113,10 @@ def resolve_track_by_isrc(cm, isrc):
     if not clean_isrc:
         return None
 
+    if clean_isrc in cm._track_isrc_cache:
+        logger.debug("resolve_track_by_isrc: cache hit for %s", clean_isrc)
+        return cm._track_isrc_cache[clean_isrc]
+
     try:
         ids_obj = cm.get_track_ids_by_isrc(clean_isrc) or {}
         if isinstance(ids_obj, list):
@@ -116,10 +127,12 @@ def resolve_track_by_isrc(cm, isrc):
             ids_row = {}
         cm_ids = ids_row.get("chartmetric_ids") or []
         if not cm_ids:
+            cm._track_isrc_cache[clean_isrc] = None
             return None
         cm_track_id = cm_ids[0]
         full = cm.get_track(cm_track_id) or {}
     except Exception:
+        cm._track_isrc_cache[clean_isrc] = None
         return None
 
     album_record_label = ""
@@ -144,11 +157,16 @@ def resolve_track_by_isrc(cm, isrc):
             album_record_label = candidate
             break
 
-    return {
+    artist_names = full.get("artist_names") or []
+    if not artist_names:
+        raw_artists = full.get("artists") or []
+        artist_names = [a["name"] for a in raw_artists if isinstance(a, dict) and a.get("name")]
+
+    result = {
         "cm_track_id": cm_track_id,
         "name": full.get("name"),
         "isrc": full.get("isrc") or clean_isrc,
-        "artist_names": full.get("artist_names") or [],
+        "artist_names": artist_names,
         "release_date": _extract_release_date(full),
         "songwriters": _extract_songwriters(full),
         "album_label": full.get("album_label"),
@@ -156,6 +174,8 @@ def resolve_track_by_isrc(cm, isrc):
         "track_record_label": full.get("record_label") or full.get("label"),
         "match_confidence": 1.0,
     }
+    cm._track_isrc_cache[clean_isrc] = result
+    return result
 
 
 def _print_banner():
@@ -182,12 +202,30 @@ def enrich_artist(cm, artist_name):
     """
     if not artist_name:
         return None
-    search_result = cm.find_artist(artist_name)
+    cache_key = artist_name.lower().strip()
+    if cache_key in cm._artist_cache:
+        logger.debug("enrich_artist: cache hit for %r", artist_name)
+        return cm._artist_cache[cache_key]
+    logger.debug("enrich_artist: searching for %r", artist_name)
+    t0 = time.perf_counter()
+    try:
+        search_result = cm.find_artist(artist_name)
+    except Exception:
+        logger.warning("enrich_artist: Chartmetric lookup failed for %r", artist_name, exc_info=True)
+        cm._artist_cache[cache_key] = None
+        return None
     if not search_result:
+        logger.debug("enrich_artist: no result for %r (%.2fs)", artist_name, time.perf_counter() - t0)
+        cm._artist_cache[cache_key] = None
         return None
 
     cm_id = search_result.get("id")
-    meta = cm.get_artist(cm_id)
+    logger.debug("enrich_artist: found cm_id=%s for %r, fetching metadata", cm_id, artist_name)
+    try:
+        meta = cm.get_artist(cm_id)
+    except Exception:
+        logger.warning("enrich_artist: get_artist failed for cm_id=%s", cm_id, exc_info=True)
+        meta = {}
     career = {}
     try:
         career = cm.get_artist_career(cm_id)
@@ -205,7 +243,8 @@ def enrich_artist(cm, artist_name):
     except Exception:
         platform_ids = {}
 
-    return {
+    logger.debug("enrich_artist: done %r in %.2fs", artist_name, time.perf_counter() - t0)
+    result = {
         "input_name": artist_name,
         "cm_id": cm_id,
         "name": search_result.get("name") or meta.get("name"),
@@ -223,12 +262,16 @@ def enrich_artist(cm, artist_name):
         "search_result": search_result,
         "metadata": meta,
     }
+    cm._artist_cache[cache_key] = result
+    return result
 
 
 def find_original_isrc(cm, artist_name, song_name):
     """Find likely original track ISRC via Chartmetric track search."""
     if not artist_name or not song_name:
         return None
+    logger.debug("find_original_isrc: %r – %r", artist_name, song_name)
+    _t0 = time.perf_counter()
 
     def _norm(value):
         text = (value or "").lower()
@@ -310,6 +353,7 @@ def find_original_isrc(cm, artist_name, song_name):
     query = f"{artist_name} {song_name}"
     tracks = cm.search(query, "tracks", limit=10)
     if not tracks:
+        logger.debug("find_original_isrc: no tracks found for %r (%.2fs)", query, time.perf_counter() - _t0)
         return None
 
     scored = sorted(
@@ -317,6 +361,7 @@ def find_original_isrc(cm, artist_name, song_name):
         key=lambda row: row["score"],
         reverse=True,
     )
+    logger.debug("find_original_isrc: fetching full metadata for top %d candidates", min(5, len(scored)))
     finalists = []
     for row in scored[:5]:
         track = row["track"]
@@ -391,6 +436,7 @@ def find_original_isrc(cm, artist_name, song_name):
         or top.get("record_label")
         or top.get("label")
     )
+    logger.debug("find_original_isrc: done %r – %r in %.2fs (isrc=%s)", artist_name, song_name, time.perf_counter() - _t0, isrc)
     return {
         "cm_track_id": canonical_track_id or top.get("id"),
         "name": label_source.get("name") or full.get("name") or top.get("name"),
@@ -428,7 +474,39 @@ def normalize_sc_track(track):
     }
 
 
-def analyze_track_object(sc_track, clients, original_isrc_override=None):
+def _enrich_possibly_multi_artist(cm, artist_name):
+    """
+    Enrich an artist name that may contain multiple collaborators (e.g. "A & B").
+
+    Splits on common collab separators, enriches each artist individually,
+    and returns a merged dict where sp_monthly_listeners and sp_followers
+    are summed across all found artists. Falls back to single-artist lookup
+    if no split is needed or no collaborators are found.
+    """
+    if not artist_name:
+        return None
+    parts = [p for p in _COLLAB_RE.split(artist_name) if p.strip()]
+    if len(parts) <= 1:
+        return enrich_artist(cm, artist_name)
+
+    logger.debug("enrich_artist: multi-artist split %r → %r", artist_name, parts)
+    enriched = [enrich_artist(cm, p) for p in parts]
+    enriched = [a for a in enriched if a]
+    if not enriched:
+        return None
+    if len(enriched) == 1:
+        return enriched[0]
+
+    merged = dict(enriched[0])
+    merged["name"] = " & ".join(a["name"] for a in enriched if a.get("name"))
+    merged["sp_monthly_listeners"] = sum(a.get("sp_monthly_listeners") or 0 for a in enriched) or None
+    merged["sp_followers"] = sum(a.get("sp_followers") or 0 for a in enriched) or None
+    merged["tiktok_followers"] = sum(a.get("tiktok_followers") or 0 for a in enriched) or None
+    logger.debug("enrich_artist: merged monthly_listeners=%s", merged["sp_monthly_listeners"])
+    return merged
+
+
+def analyze_track_object(sc_track, clients, original_isrc_override=None, min_plays=0):
     """
     Core reusable per-track analysis function.
 
@@ -439,14 +517,44 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None):
     lum = clients["lum"]
 
     norm_track = normalize_sc_track(sc_track)
-    parsed = parse_remix_title(norm_track["title"] or "")
+    title = norm_track["title"] or ""
+    logger.debug("analyze_track: start  %r", title)
+    _t0 = time.perf_counter()
+
+    parsed = parse_remix_title(title)
     sc_metrics = sc.compute_metrics(sc_track)
 
-    original_name = parsed.get("original_artist")
+    plays = sc_metrics.get("plays", 0)
+    if min_plays > 0 and plays < min_plays:
+        logger.debug("analyze_track: skip  %r  plays=%d < min_plays=%d", title, plays, min_plays)
+        return None
+    logger.debug("analyze_track: plays=%d passed gate (min_plays=%d), proceeding to Chartmetric", plays, min_plays)
+
     remix_name = parsed.get("remix_artist") or sc_track.get("user", {}).get("username")
     song_name = parsed.get("original_song")
 
-    original_artist = enrich_artist(cm, original_name) if original_name else None
+    # Resolve the original track by ISRC first so we can use the authoritative
+    # artist name from Chartmetric rather than the parsed SC title string.
+    original_track = None
+    if original_isrc_override:
+        logger.debug("analyze_track: resolve by ISRC override %s", original_isrc_override)
+        try:
+            original_track = resolve_track_by_isrc(cm, original_isrc_override)
+        except Exception:
+            logger.warning("analyze_track: ISRC override lookup failed", exc_info=True)
+            original_track = None
+
+    # Prefer artist name from Chartmetric (via ISRC); fall back to title parser.
+    if original_track and original_track.get("artist_names"):
+        cm_names = original_track["artist_names"]
+        original_name = " & ".join(cm_names) if len(cm_names) > 1 else cm_names[0]
+        logger.debug("analyze_track: using CM artist name %r (from ISRC)", original_name)
+    else:
+        original_name = parsed.get("original_artist")
+
+    logger.debug("analyze_track: enrich original artist %r", original_name)
+    original_artist = _enrich_possibly_multi_artist(cm, original_name)
+    logger.debug("analyze_track: enrich remix artist %r", remix_name)
     remix_artist = enrich_artist(cm, remix_name) if remix_name else None
 
     original_geo = (original_artist or {}).get("geo_cities", [])
@@ -466,14 +574,18 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None):
         revenue_projections=projections,
     )
 
-    original_track = None
-    if original_isrc_override:
-        original_track = resolve_track_by_isrc(cm, original_isrc_override)
     if not original_track and original_name and song_name:
-        original_track = find_original_isrc(cm, original_name, song_name)
+        logger.debug("analyze_track: find_original_isrc for %r – %r", original_name, song_name)
+        try:
+            original_track = find_original_isrc(cm, original_name, song_name)
+        except Exception:
+            logger.warning("analyze_track: find_original_isrc failed", exc_info=True)
+            original_track = None
     original_isrc = (original_track or {}).get("isrc")
+    logger.debug("analyze_track: luminate lookup isrc=%s", original_isrc)
     luminate_data = fetch_luminate_by_isrc(lum, original_isrc)
     viability = assess_viability(projections)
+    logger.debug("analyze_track: done  %r  total=%.2fs", title, time.perf_counter() - _t0)
 
     return {
         "sc_url": norm_track.get("permalink_url"),
@@ -500,11 +612,24 @@ def analyze_url(sc_url, clients):
     return analyze_track_object(sc_track, clients)
 
 
-def search_song_remixes(song_name, artist_name=None, limit=20, clients=None):
+def search_song_remixes(song_name, artist_name=None, limit=20, clients=None, min_plays=0, original_isrc=None):
     """Option 3: Search SoundCloud remixes for a specific song."""
     sc = clients["sc"]
     tracks = sc.search_remixes(song_name=song_name, artist=artist_name, limit=limit)
-    reports = [analyze_track_object(track, clients) for track in tracks]
+
+    # Pre-filter by playback_count from the SC search payload before calling analyze_track_object.
+    # analyze_track_object also enforces this gate internally as a safety net.
+    if min_plays > 0:
+        before = len(tracks)
+        tracks = [t for t in tracks if (t.get("playback_count") or 0) >= min_plays]
+        logger.debug("search_song_remixes: %d/%d tracks passed min_plays=%d filter", len(tracks), before, min_plays)
+
+    # No qualifying remixes — skip all Chartmetric calls entirely.
+    if not tracks:
+        logger.debug("search_song_remixes: no qualifying remixes for %r, skipping enrichment", song_name)
+        return []
+
+    reports = [r for r in (analyze_track_object(track, clients, original_isrc_override=original_isrc, min_plays=min_plays) for track in tracks) if r is not None]
     reports.sort(key=lambda r: r.get("opportunity_score", {}).get("overall", 0), reverse=True)
     return reports
 

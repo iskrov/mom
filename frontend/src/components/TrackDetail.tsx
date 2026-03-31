@@ -79,6 +79,9 @@ export function TrackDetail({ track, licensing, loadingLicensing, onClose }: Tra
     .filter(Boolean)
     .join('\n') || 'No follower data'
 
+  const remixArtistName =
+    track.remix_artist_enriched?.name || track.remix_artist || track.sc_user.username
+
   const velocityBars = Array.from({ length: 30 }, (_, idx) => {
     const base = Math.max(track.daily_velocity * 0.55, 1)
     const growth = idx / 29
@@ -159,7 +162,7 @@ export function TrackDetail({ track, licensing, loadingLicensing, onClose }: Tra
       </div>
 
       <div className="detail-section">
-        <div className="detail-section-title">REMIX ARTIST IMPACT</div>
+        <div className="detail-section-title">REMIX ARTIST IMPACT: {remixArtistName}</div>
         <div className="impact-grid">
           <div className="impact-cell">
             <div
@@ -176,7 +179,13 @@ export function TrackDetail({ track, licensing, loadingLicensing, onClose }: Tra
             <div className="impact-label">Career Stage</div>
           </div>
           <div className="impact-cell">
-            <div className="impact-value">{compact(track.remix_artist_enriched.sp_monthly_listeners || 0)}</div>
+            <div
+              className="impact-value impact-value-listeners hover-tooltip"
+              data-tooltip={(track.remix_artist_enriched.sp_monthly_listeners || 0).toLocaleString('en-US')}
+              tabIndex={0}
+            >
+              {compact(track.remix_artist_enriched.sp_monthly_listeners || 0)}
+            </div>
             <div className="impact-label">Monthly Listeners</div>
           </div>
         </div>

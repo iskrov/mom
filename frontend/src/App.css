@@ -1,8 +1,8 @@
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  max-width: unset;
+  margin: unset;
+  padding: unset;
+  text-align: unset;
 }
 
 .logo {
@@ -40,3 +40,195 @@
 .read-the-docs {
   color: #888;
 }
+
+/* ── Song Case Page ─────────────────────────────────────── */
+.song-case-page {
+  padding: 20px 24px;
+  max-width: 900px;
+}
+
+.scp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.scp-title { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+.scp-meta { font-size: 12px; opacity: 0.6; }
+.scp-isrc { font-size: 11px; opacity: 0.5; }
+
+.scp-close-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: inherit;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.scp-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  margin-bottom: 16px;
+  opacity: 0.8;
+}
+.scp-legend-item { display: flex; align-items: center; gap: 5px; }
+.scp-legend-muted { opacity: 0.5; }
+.scp-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.scp-dot-sc { background: #ff8800; }
+.scp-dot-sp { background: #1DB954; }
+.scp-dot-none { border: 1px dashed rgba(255,255,255,0.4); }
+
+.scp-section-label {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  opacity: 0.4;
+  margin-bottom: 6px;
+  margin-top: 4px;
+}
+.scp-section-divider {
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 10px;
+  margin-top: 8px;
+}
+
+.scp-track-row { margin-bottom: 10px; border-radius: 6px; padding: 4px 0; }
+.scp-track-highlight {
+  border: 1px solid rgba(255,136,0,0.33);
+  background: rgba(255,136,0,0.04);
+  padding: 8px;
+}
+
+.scp-track-bars { display: flex; align-items: flex-start; gap: 8px; }
+.scp-track-label {
+  width: 140px;
+  flex-shrink: 0;
+  font-size: 11px;
+  text-align: right;
+  padding-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.scp-bars { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+
+.scp-bar-row { display: flex; align-items: center; gap: 6px; }
+.scp-bar-platform { width: 18px; font-size: 10px; opacity: 0.4; flex-shrink: 0; }
+.scp-bar-track {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  height: 15px;
+  position: relative;
+  overflow: hidden;
+}
+.scp-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  min-width: 3px;
+}
+.scp-bar-label { padding-left: 6px; font-size: 10px; color: rgba(0,0,0,0.8); white-space: nowrap; }
+.scp-bar-empty {
+  height: 100%;
+  border: 1px dashed rgba(255,255,255,0.15);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+}
+.scp-bar-none { padding-left: 8px; font-size: 10px; opacity: 0.35; font-style: italic; }
+
+.scp-badge { font-size: 9px; padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
+.scp-badge-official { background: rgba(76,175,80,0.15); color: #4caf50; }
+.scp-badge-unofficial { background: rgba(255,136,0,0.15); color: #ff8800; }
+
+.scp-artist-profile {
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 5px;
+  font-size: 10px;
+  margin-top: 6px;
+  margin-left: 148px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.scp-artist-label { opacity: 0.4; font-size: 9px; letter-spacing: 0.5px; }
+.scp-artist-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.scp-artist-stat strong { font-size: 11px; }
+.scp-artist-stat span { opacity: 0.45; font-size: 9px; }
+
+.scp-insight {
+  margin-top: 16px;
+  background: rgba(107,47,255,0.1);
+  border: 1px solid rgba(107,47,255,0.33);
+  border-radius: 8px;
+  padding: 14px;
+}
+.scp-insight-label { font-size: 10px; letter-spacing: 0.5px; opacity: 0.6; margin-bottom: 8px; }
+.scp-insight-text { font-size: 13px; line-height: 1.6; margin: 0 0 10px; }
+.scp-insight-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Watch List Panel ───────────────────────────────────── */
+.watchlist-panel {
+  position: fixed;
+  top: 0; right: 0;
+  width: 360px;
+  height: 100vh;
+  background: var(--color-surface, #1a1a2e);
+  border-left: 1px solid rgba(255,255,255,0.1);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  overflow-y: auto;
+  box-shadow: -4px 0 20px rgba(0,0,0,0.4);
+}
+.watchlist-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.watchlist-title { font-size: 16px; font-weight: 600; margin: 0; }
+.watchlist-close { background: transparent; border: none; color: inherit; font-size: 20px; cursor: pointer; opacity: 0.6; padding: 0 4px; }
+.watchlist-empty { font-size: 12px; opacity: 0.5; line-height: 1.6; }
+.watchlist-cards { display: flex; flex-direction: column; gap: 10px; }
+.watchlist-card {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 12px;
+}
+.watchlist-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+.watchlist-card-title { font-size: 13px; font-weight: 600; }
+.watchlist-card-artist { font-size: 11px; opacity: 0.6; }
+.watchlist-remove { background: transparent; border: none; color: inherit; cursor: pointer; opacity: 0.4; font-size: 16px; }
+.watchlist-card-remix { font-size: 11px; opacity: 0.7; margin-bottom: 4px; }
+.watchlist-card-insight { font-size: 11px; opacity: 0.5; line-height: 1.5; margin: 0; }
+
+.watchlist-badge {
+  background: #6b2fff;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Case Page button in table */
+.btn-case-page {
+  background: rgba(107,47,255,0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(107,47,255,0.3);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-case-page:hover { background: rgba(107,47,255,0.25); }

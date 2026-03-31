@@ -4,6 +4,7 @@ interface ResultsTableProps {
   rows: TrackResult[]
   selectedTrackId: number | null
   onToggleTrackSelect: (track: TrackResult) => void
+  onOpenCasePage: (track: TrackResult) => void
 }
 
 function compact(n: number): string {
@@ -20,7 +21,8 @@ function clean(text?: string): string {
   return (text || '').replace(/\s+/g, ' ').trim()
 }
 
-export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect }: ResultsTableProps) {
+export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect, onOpenCasePage }: ResultsTableProps) {
+  let remixRank = 0
   return (
     <div className="results-table-wrap">
       <table className="results-table">
@@ -41,7 +43,7 @@ export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect }: Res
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => {
+          {rows.map((row) => {
             const oppClass =
               row.opportunity_score.overall >= 8
                 ? 'opp-strong'
@@ -49,8 +51,13 @@ export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect }: Res
                   ? 'opp-mid'
                   : 'opp-low'
             const isSelected = selectedTrackId === row.track_id
+            const isReference = Boolean(row.is_reference_original)
+            if (!isReference) remixRank += 1
             return (
-              <tr key={row.track_id} className={isSelected ? 'row-selected' : ''}>
+              <tr
+                key={row.track_id}
+                className={`${isSelected ? 'row-selected' : ''} ${isReference ? 'row-reference' : ''}`.trim()}
+              >
                 <td>
                   <input
                     type="checkbox"
@@ -59,7 +66,7 @@ export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect }: Res
                     aria-label={`Select track ${row.title}`}
                   />
                 </td>
-                <td>{index + 1}</td>
+                <td>{isReference ? '★' : remixRank}</td>
                 <td>
                   <div className="title-cell">
                     {row.permalink_url ? (
@@ -75,7 +82,11 @@ export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect }: Res
                       <div className="title-main">{clean(row.title) || 'Untitled'}</div>
                     )}
                     <div className="cell-muted title-sub">
-                      orig: {clean(row.original_song) || 'Unknown'} - {clean(row.original_artist) || 'Unknown'}
+                      {isReference ? (
+                        <span className="reference-badge">ORIGINAL REFERENCE</span>
+                      ) : (
+                        <>orig: {clean(row.original_song) || 'Unknown'} - {clean(row.original_artist) || 'Unknown'}</>
+                      )}
                     </div>
                   </div>
                 </td>
@@ -98,6 +109,9 @@ export function ResultsTable({ rows, selectedTrackId, onToggleTrackSelect }: Res
                     </button>
                     <button className="btn-action" type="button">
                       Action →
+                    </button>
+                    <button className="btn-case-page" onClick={() => onOpenCasePage(row)} type="button">
+                      Case Page →
                     </button>
                   </div>
                 </td>

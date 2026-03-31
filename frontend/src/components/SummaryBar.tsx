@@ -10,18 +10,19 @@ function compact(n: number): string {
 }
 
 export function SummaryBar({ tracks, totalFound }: SummaryBarProps) {
-  const totalStreams = tracks.reduce((sum, row) => sum + row.plays, 0)
-  const totalLikes = tracks.reduce((sum, row) => sum + row.likes, 0)
-  const avgHeat = tracks.length ? tracks.reduce((sum, row) => sum + row.heat_score, 0) / tracks.length : 0
-  const avgOpp = tracks.length
-    ? tracks.reduce((sum, row) => sum + row.opportunity_score.overall, 0) / tracks.length
+  const remixTracks = tracks.filter((row) => !row.is_reference_original)
+  const totalStreams = remixTracks.reduce((sum, row) => sum + row.plays, 0)
+  const totalLikes = remixTracks.reduce((sum, row) => sum + row.likes, 0)
+  const avgHeat = remixTracks.length ? remixTracks.reduce((sum, row) => sum + row.heat_score, 0) / remixTracks.length : 0
+  const avgOpp = remixTracks.length
+    ? remixTracks.reduce((sum, row) => sum + row.opportunity_score.overall, 0) / remixTracks.length
     : 0
 
   return (
     <div className="summary-grid">
       <div className="metric-card">
         <div className="metric-label">TRACKS (FILTERED)</div>
-        <div className="metric-value">{tracks.length}</div>
+        <div className="metric-value">{remixTracks.length}</div>
         <div className="metric-meta">of {totalFound} found</div>
       </div>
       <div className="metric-card">

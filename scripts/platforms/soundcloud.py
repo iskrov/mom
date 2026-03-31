@@ -18,11 +18,17 @@ Usage:
     remixes = sc.search_remixes("Blinding Lights", artist="The Weeknd")
 """
 
+import json
+import logging
+import time
 from datetime import datetime
 
 import requests
 
 from scripts.config import cfg
+
+logger = logging.getLogger(__name__)
+_raw_track_logged = False
 
 
 class SoundCloudClient:
@@ -34,14 +40,33 @@ class SoundCloudClient:
         self.headers = cfg.SC_HEADERS
 
     def _get(self, path, params=None):
-        """GET request with client_id and browser headers."""
+        """GET request with client_id and browser headers.
+
+        Retries once on transient SSL/connection errors (e.g., the
+        SSL: UNEXPECTED_EOF_WHILE_READING errors seen from api-v2.soundcloud.com).
+        """
         params = params or {}
         params["client_id"] = self.client_id
-        resp = requests.get(
-            f"{self.base}{path}",
-            params=params,
-            headers=self.headers,
-        )
+        logger.debug("SC →  %s", path)
+        t0 = time.perf_counter()
+        try:
+            resp = requests.get(
+                f"{self.base}{path}",
+                params=params,
+                headers=self.headers,
+                timeout=20,
+            )
+        except (requests.exceptions.SSLError, requests.exceptions.ConnectionError) as exc:
+            logger.warning("SC SSL/connection error on %s — retrying once: %s", path, exc)
+            time.sleep(1.5)
+            resp = requests.get(
+                f"{self.base}{path}",
+                params=params,
+                headers=self.headers,
+                timeout=20,
+            )
+        elapsed = time.perf_counter() - t0
+        logger.debug("SC ←  %s  %.2fs  HTTP %s", path, elapsed, resp.status_code)
         resp.raise_for_status()
         return resp.json()
 
@@ -231,6 +256,11 @@ class SoundCloudClient:
                 daily_velocity   — plays per day since upload
                 days_live        — days since upload
         """
+        global _raw_track_logged
+        if not _raw_track_logged:
+            _raw_track_logged = True
+            logger.info("SC RAW TRACK DUMP (first track only):\n%s", json.dumps(track, indent=2, default=str))
+
         plays = track.get("playback_count") or 0
         likes = track.get("likes_count") or track.get("favoritings_count") or 0
 

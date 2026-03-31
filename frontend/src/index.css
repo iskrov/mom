@@ -268,6 +268,23 @@ body {
   cursor: not-allowed;
 }
 
+.stop-btn {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid var(--red, #e05);
+  background: transparent;
+  color: var(--red, #e05);
+  border-radius: 8px;
+  padding: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stop-btn:hover {
+  background: var(--red, #e05);
+  color: #fff;
+}
+
 .value-row,
 .range-labels {
   display: flex;
@@ -306,10 +323,31 @@ body {
   color: var(--muted);
   font-size: 13px;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .status-error {
   color: var(--red);
+}
+
+.download-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--purple);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--purple);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.download-btn:hover {
+  background: var(--purple);
+  color: #fff;
 }
 
 .coming-soon-note {
@@ -382,6 +420,94 @@ body {
   color: var(--text);
 }
 
+.scatter-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.scatter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.scatter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scatter-header h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.scatter-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  cursor: grab;
+}
+
+.scatter-svg.dragging {
+  cursor: grabbing;
+}
+
+.scatter-gridline {
+  stroke: color-mix(in srgb, var(--border) 80%, transparent);
+  stroke-width: 1;
+}
+
+.scatter-zero-line {
+  stroke: color-mix(in srgb, var(--purple) 55%, var(--text));
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.scatter-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: 'Space Mono', monospace;
+}
+
+.scatter-label-left {
+  text-anchor: end;
+}
+
+.scatter-label-bottom {
+  text-anchor: middle;
+}
+
+.scatter-axis-title {
+  fill: var(--muted);
+  font-size: 12px;
+  font-family: 'Space Mono', monospace;
+  letter-spacing: 0.02em;
+}
+
+.scatter-point {
+  fill: var(--orange);
+  fill-opacity: 0.86;
+  stroke: var(--surface);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.scatter-point:hover {
+  fill-opacity: 1;
+}
+
+.scatter-point.selected {
+  fill: var(--purple);
+  stroke: var(--text);
+  stroke-width: 1.4;
+}
+
 .results-table {
   width: 100%;
   border-collapse: collapse;
@@ -406,6 +532,10 @@ body {
 
 .row-selected {
   background: color-mix(in srgb, var(--purple) 8%, transparent);
+}
+
+.row-reference {
+  background: color-mix(in srgb, var(--purple) 10%, var(--surface));
 }
 
 .results-table th {
@@ -448,6 +578,17 @@ body {
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.reference-badge {
+  display: inline-block;
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border: 1px solid color-mix(in srgb, var(--purple) 50%, var(--border));
+  color: var(--purple);
+  border-radius: 999px;
+  padding: 1px 7px;
 }
 
 .heat-rising {
@@ -741,7 +882,7 @@ body {
   padding: 12px 6px;
   text-align: center;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .impact-value {
@@ -765,6 +906,14 @@ body {
   font-size: 22px;
   overflow: visible;
   text-overflow: clip;
+}
+
+.impact-value-listeners {
+  font-size: 20px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .hover-tooltip-pre::after {

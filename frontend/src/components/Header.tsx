@@ -8,14 +8,18 @@ interface HeaderProps {
   tabs: UiTab[]
   activeMode: SearchMode
   onSelectMode: (mode: SearchMode) => void
+  watchListCount: number
+  onOpenWatchList: () => void
 }
 
 const MODE_KEYS: SearchMode[] = [
   'catalog_search',
+  'catalog_scatter',
   'artist_search',
   'song_search',
   'remix_browse',
   'sc_link_lookup',
+  'song_case',
 ]
 
 export function Header({
@@ -25,6 +29,8 @@ export function Header({
   tabs,
   activeMode,
   onSelectMode,
+  watchListCount,
+  onOpenWatchList,
 }: HeaderProps) {
   const normalizeGroup = (value: string) => value.trim().replace(/\s+/g, ' ').toUpperCase()
   let prevGroup = ''
@@ -67,6 +73,11 @@ export function Header({
       </nav>
 
       <div className="header-right">
+        {watchListCount > 0 && (
+          <button className="watchlist-badge" type="button" onClick={onOpenWatchList}>
+            Watch List ({watchListCount})
+          </button>
+        )}
         <span className="build-stamp">UI {buildStamp}</span>
         <span className="org-name">{organization}</span>
         <div className="avatar">JL</div>

@@ -34,6 +34,7 @@ export async function streamArtistSearch(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       artist_name: filters.artistName,
+      min_plays: filters.artistMinPlays || 0,
       tracks_to_fetch: filters.tracksToFetch,
       sort_by: filters.sortBy === 'opportunity_score' ? 'heat_score' : filters.sortBy,
       sort_desc: true,
@@ -95,6 +96,7 @@ export async function streamSongSearch(
       song_name: filters.songName,
       artist_name: filters.songArtistName || undefined,
       isrc_override: filters.isrcOverride.trim() || undefined,
+      min_plays: filters.songMinPlays || 0,
       tracks_to_fetch: filters.tracksToFetch,
       enrich_chartmetric: filters.enrichChartmetric,
       check_official_release: filters.checkOfficialRelease,
@@ -151,6 +153,8 @@ export async function streamCatalogSearch(
   file: File,
   limitRemixes: number,
   minPlays: number,
+  offset: number,
+  count: number,
   handlers: EventHandlers,
   signal: AbortSignal,
 ): Promise<void> {
@@ -158,6 +162,8 @@ export async function streamCatalogSearch(
   formData.append('file', file)
   formData.append('limit_remixes', String(limitRemixes))
   formData.append('min_plays', String(minPlays))
+  if (offset > 0) formData.append('offset', String(offset))
+  if (count > 0) formData.append('count', String(count))
 
   const response = await fetch(`${API_BASE}/search/catalog`, {
     method: 'POST',

@@ -36,6 +36,7 @@ export interface RevenueTier {
 
 export interface TrackResult {
   track_id: number
+  is_reference_original?: boolean
   title: string
   original_song?: string
   permalink_url: string
@@ -93,14 +94,18 @@ export interface LicensingPayload {
 
 export interface SearchFilters {
   artistName: string
+  artistMinPlays: number
   songName: string
   songArtistName: string
   isrcOverride: string
+  songMinPlays: number
   scLink: string
   catalogLimitRemixes: number
   catalogMinPlays: number
+  catalogOffset: number
+  catalogCount: number
   tracksToFetch: number
-  sortBy: 'heat_score' | 'opportunity_score' | 'daily_velocity' | 'likes'
+  sortBy: 'heat_score' | 'opportunity_score' | 'daily_velocity' | 'likes' | 'plays'
   genre: string
   region: string
   careerStages: string[]
@@ -114,10 +119,26 @@ export interface SearchFilters {
 
 export type SearchMode =
   | 'catalog_search'
+  | 'catalog_scatter'
   | 'artist_search'
   | 'song_search'
   | 'remix_browse'
   | 'sc_link_lookup'
+  | 'song_case'
+
+export interface SongCaseData {
+  original: TrackResult
+  unofficialRemixes: TrackResult[]
+}
+
+export interface WatchListEntry {
+  id: string
+  songTitle: string
+  artist: string
+  topRemixArtist: string
+  topRemixPlays: number
+  insight: string
+}
 
 export interface UiTab {
   group: string
