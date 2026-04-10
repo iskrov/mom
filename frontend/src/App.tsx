@@ -158,7 +158,7 @@ function App() {
     const referenceRow = results.find((r) => r.is_reference_original && r.original_song === originalSong)
     const original = referenceRow ?? track
     const unofficialRemixes = results
-      .filter((r) => !r.is_reference_original && r.original_song === originalSong && r.track_id !== original.track_id)
+      .filter((r) => !r.is_reference_original && r.original_song === originalSong)
       .sort((a, b) => b.plays - a.plays)
     setActiveSongCase({ original, unofficialRemixes })
     setActiveMode('song_case')
