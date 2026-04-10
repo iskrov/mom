@@ -2,5 +2,8 @@ requests>=2.31
 python-dotenv>=1.0
 fastapi
 uvicorn[standard]
+gunicorn
 pydantic
 musicbrainzngs>=0.7
+python-multipart>=0.0.9
+aiofiles>=23.0.0
