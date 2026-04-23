@@ -109,6 +109,18 @@ class _Config:
             fetched = _fetch_sc_client_id()
             if fetched:
                 self.SC_CLIENT_ID = fetched
+        logger.warning("SoundCloud client_id in use: %s", self.SC_CLIENT_ID)
+        # Verify the key works
+        try:
+            resp = requests.get(
+                "https://api-v2.soundcloud.com/search/tracks",
+                params={"q": "test", "limit": 1, "client_id": self.SC_CLIENT_ID},
+                headers=self.SC_HEADERS,
+                timeout=10,
+            )
+            logger.warning("SoundCloud key check: HTTP %s", resp.status_code)
+        except Exception as exc:
+            logger.warning("SoundCloud key check failed: %s", exc)
 
     # ── Chartmetric auth ───────────────────────────────────────────
 
