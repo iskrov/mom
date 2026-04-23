@@ -60,7 +60,7 @@ class _Config:
     # ── SoundCloud (unofficial v2 API) ─────────────────────────────
 
     SC_CLIENT_ID = os.getenv("SOUNDCLOUD_CLIENT_ID", "b73paRnaV82c1ypnjCCsgrFwg47vYs8a")
-    SC_BASE = "https://api-v2.soundcloud.com"
+    SC_BASE = "https://soundcloud-proxy.adam-guerin12.workers.dev"
 
     # SoundCloud's api-v2 rejects requests without browser-like headers.
     SC_HEADERS = {
