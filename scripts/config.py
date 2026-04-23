@@ -13,11 +13,35 @@ Usage:
     cfg.SC_CLIENT_ID  # -> SoundCloud public client_id
 """
 
+import logging
 import os
+import re
 import time
 
 import requests
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+
+def _fetch_sc_client_id():
+    """Extract a fresh client_id from SoundCloud's JS bundle."""
+    try:
+        html = requests.get(
+            "https://soundcloud.com",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        ).text
+        scripts = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', html)
+        for url in scripts[-3:]:
+            js = requests.get(url, timeout=10).text
+            match = re.search(r'client_id\s*:\s*"([a-zA-Z0-9]{32})"', js)
+            if match:
+                logger.info("Fetched fresh SoundCloud client_id from JS bundle")
+                return match.group(1)
+    except Exception as exc:
+        logger.warning("Could not auto-fetch SoundCloud client_id: %s", exc)
+    return None
 
 # ── Load .env ──────────────────────────────────────────────────────
 
@@ -81,6 +105,10 @@ class _Config:
 
     def __init__(self):
         self._tokens = {}
+        if not os.getenv("SOUNDCLOUD_CLIENT_ID"):
+            fetched = _fetch_sc_client_id()
+            if fetched:
+                self.SC_CLIENT_ID = fetched
 
     # ── Chartmetric auth ───────────────────────────────────────────
 
