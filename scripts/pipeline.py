@@ -585,8 +585,7 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None, min_pla
             logger.warning("analyze_track: find_original_isrc failed", exc_info=True)
             original_track = None
     original_isrc = (original_track or {}).get("isrc")
-    logger.debug("analyze_track: luminate lookup isrc=%s", original_isrc)
-    luminate_data = fetch_luminate_by_isrc(lum, original_isrc)
+    luminate_data = None
     viability = assess_viability(projections)
     logger.debug("analyze_track: done  %r  total=%.2fs", title, time.perf_counter() - _t0)
 
