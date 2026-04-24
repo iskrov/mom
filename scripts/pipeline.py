@@ -222,28 +222,26 @@ def enrich_artist(cm, artist_name):
 
     cm_id = search_result.get("id")
     logger.debug("enrich_artist: found cm_id=%s for %r, fetching metadata", cm_id, artist_name)
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        meta_f = ex.submit(cm.get_artist, cm_id)
-        career_f = ex.submit(cm.get_artist_career, cm_id)
-        ids_f = ex.submit(cm.get_artist_platform_ids, cm_id)
-        try:
-            meta = meta_f.result() or {}
-        except Exception:
-            logger.warning("enrich_artist: get_artist failed for cm_id=%s", cm_id, exc_info=True)
-            meta = {}
-        try:
-            career = career_f.result() or {}
-        except Exception:
-            career = {}
-        try:
-            ids = ids_f.result()
-            platform_ids = ids[0] if isinstance(ids, list) and ids else (ids or {})
-        except Exception:
-            platform_ids = {}
+    try:
+        meta = cm.get_artist(cm_id)
+    except Exception:
+        logger.warning("enrich_artist: get_artist failed for cm_id=%s", cm_id, exc_info=True)
+        meta = {}
+    career = {}
+    try:
+        career = cm.get_artist_career(cm_id)
+    except Exception:
+        career = {}
     if isinstance(career, list):
         career = career[0] if career else {}
     if not isinstance(career, dict):
         career = {}
+    cities = []
+    try:
+        ids = cm.get_artist_platform_ids(cm_id)
+        platform_ids = ids[0] if isinstance(ids, list) and ids else (ids or {})
+    except Exception:
+        platform_ids = {}
     cities = []
 
     logger.debug("enrich_artist: done %r in %.2fs", artist_name, time.perf_counter() - t0)
