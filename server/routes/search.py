@@ -421,6 +421,7 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
 
             clients = make_clients()
             all_items: list[dict] = []
+            seen_track_ids: set = set()
 
             for idx, record in enumerate(songs, start=1):
                 title = record["title"]
@@ -475,6 +476,11 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
                 )
                 for report in reports:
                     item = _summarize_report(report)
+                    tid = item.get("track_id")
+                    if tid and tid in seen_track_ids:
+                        continue
+                    if tid:
+                        seen_track_ids.add(tid)
                     all_items.append(item)
                     yield _sse_event("track", {"track": item, "song": title, "song_index": idx})
 
