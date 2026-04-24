@@ -17,6 +17,7 @@ Usage:
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -104,9 +105,9 @@ class ChartmetricClient:
             Best-matching artist dict, or None.
         """
         variants = [name, f"The {name}", f"DJ {name}"]
-        candidates = []
-        for variant in variants:
-            candidates.extend(self.search(variant, "artists", limit=limit))
+        with ThreadPoolExecutor(max_workers=len(variants)) as ex:
+            all_results = list(ex.map(lambda v: self.search(v, "artists", limit=limit), variants))
+        candidates = [c for batch in all_results for c in batch]
 
         if not candidates:
             return None
