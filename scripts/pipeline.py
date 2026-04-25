@@ -11,7 +11,6 @@ import argparse
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -553,12 +552,10 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None, min_pla
     else:
         original_name = parsed.get("original_artist")
 
-    logger.debug("analyze_track: enrich original+remix artists in parallel")
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        original_future = ex.submit(_enrich_possibly_multi_artist, cm, original_name)
-        remix_future = ex.submit(enrich_artist, cm, remix_name) if remix_name else None
-        original_artist = original_future.result()
-        remix_artist = remix_future.result() if remix_future else None
+    logger.debug("analyze_track: enrich original artist %r", original_name)
+    original_artist = _enrich_possibly_multi_artist(cm, original_name)
+    logger.debug("analyze_track: enrich remix artist %r", remix_name)
+    remix_artist = enrich_artist(cm, remix_name) if remix_name else None
 
     original_geo = (original_artist or {}).get("geo_cities", [])
     remix_geo = (remix_artist or {}).get("geo_cities", [])
