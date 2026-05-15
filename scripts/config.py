@@ -76,6 +76,7 @@ class _Config:
 
     CM_BASE = "https://api.chartmetric.com/api"
     CM_REFRESH_TOKEN = os.getenv("CHARTMETRIC_REFRESH_TOKEN")
+    CM_ENABLED = False  # Temporarily disabled — re-enable by setting to bool(os.getenv("CHARTMETRIC_REFRESH_TOKEN"))
     CM_RATE_LIMIT_DELAY = 0.3  # seconds between requests (4 req/sec limit)
 
     # ── Luminate ───────────────────────────────────────────────────

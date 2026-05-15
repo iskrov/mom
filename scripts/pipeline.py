@@ -515,6 +515,7 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None, min_pla
     sc = clients["sc"]
     cm = clients["cm"]
     lum = clients["lum"]
+    cm_enabled = clients.get("cm_enabled", True)
 
     norm_track = normalize_sc_track(sc_track)
     title = norm_track["title"] or ""
@@ -528,34 +529,44 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None, min_pla
     if min_plays > 0 and plays < min_plays:
         logger.debug("analyze_track: skip  %r  plays=%d < min_plays=%d", title, plays, min_plays)
         return None
-    logger.debug("analyze_track: plays=%d passed gate (min_plays=%d), proceeding to Chartmetric", plays, min_plays)
 
     remix_name = parsed.get("remix_artist") or sc_track.get("user", {}).get("username")
     song_name = parsed.get("original_song")
-
-    # Resolve the original track by ISRC first so we can use the authoritative
-    # artist name from Chartmetric rather than the parsed SC title string.
+    original_name = parsed.get("original_artist")
     original_track = None
-    if original_isrc_override:
-        logger.debug("analyze_track: resolve by ISRC override %s", original_isrc_override)
-        try:
-            original_track = resolve_track_by_isrc(cm, original_isrc_override)
-        except Exception:
-            logger.warning("analyze_track: ISRC override lookup failed", exc_info=True)
-            original_track = None
+    original_artist = None
+    remix_artist = None
 
-    # Prefer artist name from Chartmetric (via ISRC); fall back to title parser.
-    if original_track and original_track.get("artist_names"):
-        cm_names = original_track["artist_names"]
-        original_name = " & ".join(cm_names) if len(cm_names) > 1 else cm_names[0]
-        logger.debug("analyze_track: using CM artist name %r (from ISRC)", original_name)
+    if cm_enabled:
+        logger.debug("analyze_track: plays=%d passed gate (min_plays=%d), proceeding to Chartmetric", plays, min_plays)
+        # Resolve the original track by ISRC first so we can use the authoritative
+        # artist name from Chartmetric rather than the parsed SC title string.
+        if original_isrc_override:
+            logger.debug("analyze_track: resolve by ISRC override %s", original_isrc_override)
+            try:
+                original_track = resolve_track_by_isrc(cm, original_isrc_override)
+            except Exception:
+                logger.warning("analyze_track: ISRC override lookup failed", exc_info=True)
+
+        # Prefer artist name from Chartmetric (via ISRC); fall back to title parser.
+        if original_track and original_track.get("artist_names"):
+            cm_names = original_track["artist_names"]
+            original_name = " & ".join(cm_names) if len(cm_names) > 1 else cm_names[0]
+            logger.debug("analyze_track: using CM artist name %r (from ISRC)", original_name)
+
+        logger.debug("analyze_track: enrich original artist %r", original_name)
+        original_artist = _enrich_possibly_multi_artist(cm, original_name)
+        logger.debug("analyze_track: enrich remix artist %r", remix_name)
+        remix_artist = enrich_artist(cm, remix_name) if remix_name else None
+
+        if not original_track and original_name and song_name:
+            logger.debug("analyze_track: find_original_isrc for %r – %r", original_name, song_name)
+            try:
+                original_track = find_original_isrc(cm, original_name, song_name)
+            except Exception:
+                logger.warning("analyze_track: find_original_isrc failed", exc_info=True)
     else:
-        original_name = parsed.get("original_artist")
-
-    logger.debug("analyze_track: enrich original artist %r", original_name)
-    original_artist = _enrich_possibly_multi_artist(cm, original_name)
-    logger.debug("analyze_track: enrich remix artist %r", remix_name)
-    remix_artist = enrich_artist(cm, remix_name) if remix_name else None
+        logger.debug("analyze_track: Chartmetric disabled, skipping enrichment for %r", title)
 
     original_geo = (original_artist or {}).get("geo_cities", [])
     remix_geo = (remix_artist or {}).get("geo_cities", [])
@@ -574,13 +585,6 @@ def analyze_track_object(sc_track, clients, original_isrc_override=None, min_pla
         revenue_projections=projections,
     )
 
-    if not original_track and original_name and song_name:
-        logger.debug("analyze_track: find_original_isrc for %r – %r", original_name, song_name)
-        try:
-            original_track = find_original_isrc(cm, original_name, song_name)
-        except Exception:
-            logger.warning("analyze_track: find_original_isrc failed", exc_info=True)
-            original_track = None
     original_isrc = (original_track or {}).get("isrc")
     luminate_data = None
     viability = assess_viability(projections)
@@ -718,6 +722,7 @@ def make_clients():
         "sc": SoundCloudClient(),
         "cm": ChartmetricClient(),
         "lum": LuminateClient(),
+        "cm_enabled": cfg.CM_ENABLED,
     }
 
 
