@@ -16,7 +16,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from scripts.models import compute_demand_score
-from scripts.catalog import parse_catalog_file
+from scripts.catalog import count_csv_rows, stream_catalog_records
 from scripts.pipeline import (
     analyze_track_object,
     make_clients,
@@ -398,41 +398,47 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
     def stream():
         executor = ThreadPoolExecutor(max_workers=1)
         try:
-            records = parse_catalog_file(temp_path)
+            # Fast line count so we can show progress immediately without reading all rows first.
+            approx_total = count_csv_rows(temp_path) if suffix == ".csv" else None
+            yield _sse_event("status", {"message": "catalog_loaded", "count": approx_total or 0})
 
-            # Deduplicate by ISRC so the same song isn't processed twice.
-            seen_isrcs: set[str] = set()
-            deduped = []
-            for r in records:
-                isrc = r.get("isrc")
-                if isrc:
-                    if isrc in seen_isrcs:
-                        continue
-                    seen_isrcs.add(isrc)
-                deduped.append(r)
-
-            songs = [r for r in deduped if r.get("title")]
             safe_offset = max(0, int(offset or 0))
             safe_count = max(0, int(count or 0))
-            if safe_offset > 0 or safe_count > 0:
-                end = (safe_offset + safe_count) if safe_count > 0 else None
-                songs = songs[safe_offset:end]
-            yield _sse_event("status", {"message": "catalog_loaded", "count": len(songs)})
 
             clients = make_clients()
             all_items: list[dict] = []
             seen_track_ids: set = set()
+            seen_isrcs: set[str] = set()
 
-            for idx, record in enumerate(songs, start=1):
+            # Stream rows one at a time — dedup and offset/count applied on the fly.
+            valid_idx = 0  # counts records that pass dedup + have a title
+            idx = 0        # counts records actually searched (after offset/count slice)
+            for record in stream_catalog_records(temp_path):
+                if not record.get("title"):
+                    continue
+                isrc = record.get("isrc")
+                if isrc:
+                    if isrc in seen_isrcs:
+                        continue
+                    seen_isrcs.add(isrc)
+
+                valid_idx += 1
+                if valid_idx <= safe_offset:
+                    continue
+                if safe_count > 0 and (valid_idx - safe_offset) > safe_count:
+                    break
+
+                idx += 1
                 title = record["title"]
                 artist = record.get("artist")
-                logger.info("catalog [%d/%d] starting: %r by %r", idx, len(songs), title, artist)
+                total_display = approx_total or "?"
+                logger.info("catalog [%d] starting: %r by %r", idx, title, artist)
                 song_t0 = time.perf_counter()
                 yield _sse_event("status", {
                     "message": "processing_song",
                     "song": title,
                     "index": idx,
-                    "total": len(songs),
+                    "total": total_display,
                 })
 
                 future = executor.submit(
@@ -444,35 +450,35 @@ async def search_catalog(file: UploadFile = File(...), limit_remixes: int = Form
                     reports = future.result(timeout=song_timeout_secs)
                 except FuturesTimeoutError:
                     logger.warning(
-                        "catalog [%d/%d] TIMEOUT after %ds, skipping: %r",
-                        idx, len(songs), song_timeout_secs, title,
+                        "catalog [%d] TIMEOUT after %ds, skipping: %r",
+                        idx, song_timeout_secs, title,
                     )
                     yield _sse_event("status", {
                         "message": "song_skipped",
                         "reason": "timeout",
                         "song": title,
                         "index": idx,
-                        "total": len(songs),
+                        "total": total_display,
                     })
                     continue
                 except Exception as exc:
                     logger.warning(
-                        "catalog [%d/%d] ERROR, skipping: %r — %s",
-                        idx, len(songs), title, exc,
+                        "catalog [%d] ERROR, skipping: %r — %s",
+                        idx, title, exc,
                     )
                     yield _sse_event("status", {
                         "message": "song_skipped",
                         "reason": "error",
                         "song": title,
                         "index": idx,
-                        "total": len(songs),
+                        "total": total_display,
                         "error": str(exc),
                     })
                     continue
 
                 logger.info(
-                    "catalog [%d/%d] done: %r  found=%d  elapsed=%.1fs",
-                    idx, len(songs), title, len(reports), time.perf_counter() - song_t0,
+                    "catalog [%d] done: %r  found=%d  elapsed=%.1fs",
+                    idx, title, len(reports), time.perf_counter() - song_t0,
                 )
                 for report in reports:
                     item = _summarize_report(report)

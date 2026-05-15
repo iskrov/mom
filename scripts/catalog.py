@@ -18,6 +18,37 @@ def parse_catalog_file(filepath):
     raise ValueError("Unsupported catalog format. Use .csv or .xml")
 
 
+def stream_catalog_records(filepath):
+    """
+    Lazy generator version of parse_catalog_file.
+
+    Yields one normalized record at a time so callers can start processing
+    without waiting for the full file to be read into memory.
+    XML falls back to full parse (not easily streamed).
+    """
+    if filepath.lower().endswith(".csv"):
+        with open(filepath, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                record = _norm_record(
+                    artist=row.get("artist") or row.get("artist_name"),
+                    title=row.get("title") or row.get("song") or row.get("song_title") or row.get("track_name"),
+                    isrc=row.get("isrc"),
+                )
+                if record["artist"] or record["title"] or record["isrc"]:
+                    yield record
+    elif filepath.lower().endswith(".xml"):
+        yield from parse_catalog_file(filepath)
+    else:
+        raise ValueError("Unsupported catalog format. Use .csv or .xml")
+
+
+def count_csv_rows(filepath):
+    """Fast approximate row count for a CSV (excludes header). Used to show progress before streaming."""
+    with open(filepath, "r", encoding="utf-8-sig") as f:
+        return max(0, sum(1 for _ in f) - 1)
+
+
 def _norm_record(artist=None, title=None, isrc=None):
     return {
         "artist": (artist or "").strip() or None,
