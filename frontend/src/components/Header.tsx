@@ -79,8 +79,6 @@ export function Header({
           </button>
         )}
         <span className="build-stamp">UI {buildStamp}</span>
-        <span className="org-name">{organization}</span>
-        <div className="avatar">JL</div>
         <ThemeToggle isDark={isDark} onToggle={onToggleTheme} />
       </div>
     </header>
