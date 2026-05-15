@@ -180,7 +180,6 @@ function App() {
       <Header
         isDark={isDark}
         onToggleTheme={() => setIsDark((prev) => !prev)}
-        organization={uiMeta.organization}
         tabs={navTabs}
         activeMode={activeMode}
         onSelectMode={setActiveMode}

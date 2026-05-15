@@ -4,7 +4,6 @@ import { ThemeToggle } from './ThemeToggle'
 interface HeaderProps {
   isDark: boolean
   onToggleTheme: () => void
-  organization: string
   tabs: UiTab[]
   activeMode: SearchMode
   onSelectMode: (mode: SearchMode) => void
@@ -25,7 +24,6 @@ const MODE_KEYS: SearchMode[] = [
 export function Header({
   isDark,
   onToggleTheme,
-  organization,
   tabs,
   activeMode,
   onSelectMode,
